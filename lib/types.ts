@@ -1,7 +1,7 @@
 export interface MenuItem {
   id: string;
   name: string;
-  price: number;
+  slots: number; // aantal vakjes
   available: boolean;
   order: number;
 }
@@ -22,7 +22,8 @@ export interface OrderItem {
   itemId: string;
   name: string;
   quantity: number;
-  price: number;
+  slots: number;
+  price: number; // slots * pricePerSlot op moment van bestelling
 }
 
 export interface Order {
@@ -39,7 +40,10 @@ export interface Order {
 export interface Event {
   id: string;
   name: string;
-  date: string;
+  startDate: string;
+  endDate: string;
   active: boolean;
   showPrices: boolean;
+  pricePerSlot: number;
+  accentColor: string;
 }

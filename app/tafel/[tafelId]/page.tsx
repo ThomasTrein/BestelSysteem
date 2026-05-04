@@ -45,7 +45,6 @@ export default function TafelPage() {
       setLoading(true);
       setError(null);
 
-      // Load active event
       const eventsQuery = query(collection(db, 'events'), where('active', '==', true));
       const eventsSnap = await getDocs(eventsQuery);
 
@@ -59,7 +58,6 @@ export default function TafelPage() {
       const eventData = { id: eventDoc.id, ...eventDoc.data() } as Event;
       setEvent(eventData);
 
-      // Load table
       const tableDoc = await getDoc(doc(db, 'events', eventData.id, 'tables', tafelId));
       if (!tableDoc.exists()) {
         setError('Tafel niet gevonden. Controleer de QR-code.');
@@ -68,7 +66,6 @@ export default function TafelPage() {
       }
       setTable({ id: tableDoc.id, ...tableDoc.data() } as Table);
 
-      // Load categories with items
       const catsQuery = query(
         collection(db, 'events', eventData.id, 'categories'),
         orderBy('order')
@@ -110,6 +107,7 @@ export default function TafelPage() {
   async function handleSubmit() {
     if (!event || !table) return;
 
+    const pricePerSlot = event.pricePerSlot || 0;
     const orderItems: OrderItem[] = [];
     for (const cat of categories) {
       for (const item of cat.items) {
@@ -119,7 +117,8 @@ export default function TafelPage() {
             itemId: item.id,
             name: item.name,
             quantity: qty,
-            price: item.price,
+            slots: item.slots,
+            price: item.slots * pricePerSlot,
           });
         }
       }
@@ -157,13 +156,14 @@ export default function TafelPage() {
     setSuccess(false);
   }
 
-  const totalItems = Object.values(quantities).reduce((a, b) => a + b, 0) + drankkaarten;
+  const accent = event?.accentColor || '#16a34a';
+  const totalSelected = Object.values(quantities).reduce((a, b) => a + b, 0) + drankkaarten;
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4" style={{ borderColor: accent }}></div>
           <p className="text-gray-600">Laden...</p>
         </div>
       </div>
@@ -184,14 +184,15 @@ export default function TafelPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-800 to-green-600 p-4">
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: `linear-gradient(135deg, ${accent}dd, ${accent}99)` }}>
         <div className="text-center text-white">
           <div className="text-7xl mb-6">🎉</div>
           <h1 className="text-3xl font-bold mb-3">Bedankt!</h1>
-          <p className="text-green-100 text-lg mb-8">Je bestelling is geplaatst.</p>
+          <p className="text-white/80 text-lg mb-8">Je bestelling is geplaatst.</p>
           <button
             onClick={resetOrder}
-            className="bg-white text-green-800 font-semibold py-3 px-8 rounded-xl hover:bg-green-50 transition-colors shadow-lg"
+            className="bg-white font-semibold py-3 px-8 rounded-xl hover:bg-white/90 transition-colors shadow-lg"
+            style={{ color: accent }}
           >
             Nieuwe bestelling
           </button>
@@ -203,15 +204,15 @@ export default function TafelPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-green-700 text-white px-4 py-4 sticky top-0 z-10 shadow-md">
+      <header className="text-white px-4 py-4 sticky top-0 z-10 shadow-md" style={{ backgroundColor: accent }}>
         <div className="max-w-2xl mx-auto flex justify-between items-center">
           <div>
             <h1 className="text-xl font-bold">🍺 {event?.name}</h1>
-            <p className="text-green-200 text-sm">Tafel: {table?.name}</p>
+            <p className="text-white/70 text-sm">Tafel: {table?.name}</p>
           </div>
-          {totalItems > 0 && (
-            <span className="bg-yellow-400 text-green-900 font-bold rounded-full px-3 py-1 text-sm">
-              {totalItems} item{totalItems !== 1 ? 's' : ''}
+          {totalSelected > 0 && (
+            <span className="bg-white/20 text-white font-bold rounded-full px-3 py-1 text-sm border border-white/30">
+              {totalSelected} item{totalSelected !== 1 ? 's' : ''}
             </span>
           )}
         </div>
@@ -221,70 +222,82 @@ export default function TafelPage() {
         {/* Menu categories */}
         {categories.map((cat) => (
           <section key={cat.id}>
-            <h2 className="text-lg font-bold text-gray-800 mb-3 border-b-2 border-green-200 pb-1">
+            <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
               {cat.name}
             </h2>
             <div className="space-y-3">
-              {cat.items.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-white rounded-xl p-4 shadow-sm flex items-center justify-between gap-4"
-                >
-                  <div className="flex-1">
-                    <p className="font-semibold text-gray-800">{item.name}</p>
-                    {event?.showPrices && (
-                      <p className="text-green-700 font-medium text-sm">
-                        €{item.price.toFixed(2)}
-                      </p>
-                    )}
+              {cat.items.map((item) => {
+                const pricePerSlot = event?.pricePerSlot || 0;
+                const itemPrice = item.slots * pricePerSlot;
+                return (
+                  <div
+                    key={item.id}
+                    className="bg-white rounded-xl p-4 shadow-sm flex items-center justify-between gap-4"
+                  >
+                    <div className="flex-1">
+                      <p className="font-semibold text-gray-800">{item.name}</p>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                          {item.slots} vakje{item.slots !== 1 ? 's' : ''}
+                        </span>
+                        {event?.showPrices && (
+                          <span className="text-sm font-medium" style={{ color: accent }}>
+                            €{itemPrice.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <QuantitySelector
+                      value={quantities[item.id] || 0}
+                      onChange={(v) => setQuantity(item.id, v)}
+                      accent={accent}
+                    />
                   </div>
-                  <QuantitySelector
-                    value={quantities[item.id] || 0}
-                    onChange={(v) => setQuantity(item.id, v)}
-                  />
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         ))}
 
         {/* Drankkaarten */}
         <section>
-          <h2 className="text-lg font-bold text-gray-800 mb-3 border-b-2 border-green-200 pb-1">
+          <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
             Drankkaarten
           </h2>
           <div className="bg-white rounded-xl p-4 shadow-sm flex items-center justify-between gap-4">
             <div className="flex-1">
               <p className="font-semibold text-gray-800">🎫 Drankkaarten</p>
-              <p className="text-gray-500 text-sm">Gebruik je drankkaarten hier</p>
+              <p className="text-gray-500 text-sm">Heb je nog drankkaarten nodig?</p>
             </div>
-            <QuantitySelector value={drankkaarten} onChange={setDrankkaarten} />
+            <QuantitySelector value={drankkaarten} onChange={setDrankkaarten} accent={accent} />
           </div>
         </section>
 
         {/* Opmerking */}
         <section>
-          <h2 className="text-lg font-bold text-gray-800 mb-3 border-b-2 border-green-200 pb-1">
+          <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
             Opmerking
           </h2>
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="Eventuele opmerkingen (allergieën, speciale wensen...)"
-            className="w-full bg-white rounded-xl p-4 shadow-sm border border-gray-200 resize-none text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
+            className="w-full bg-white rounded-xl p-4 shadow-sm border border-gray-200 resize-none text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2"
+            style={{ '--tw-ring-color': accent } as React.CSSProperties}
             rows={3}
           />
         </section>
 
-        {/* Submit button */}
+        {/* Submit */}
         <button
           onClick={handleSubmit}
-          disabled={submitting || totalItems === 0}
-          className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl transition-colors shadow-lg text-lg mb-8"
+          disabled={submitting || totalSelected === 0}
+          className="w-full text-white font-bold py-4 px-6 rounded-xl transition-opacity shadow-lg text-lg mb-8 disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ backgroundColor: accent }}
         >
           {submitting ? 'Bezig...' : '🛒 Bestelling plaatsen'}
         </button>
       </main>
     </div>
   );
-}
+}
