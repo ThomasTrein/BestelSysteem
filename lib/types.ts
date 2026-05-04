@@ -1,9 +1,30 @@
+export interface OptionChoice {
+  id: string;
+  name: string;
+}
+
+export interface OptionGroup {
+  id: string;
+  name: string;
+  type: 'single' | 'multi'; // single = radio buttons, multi = checkboxes
+  required: boolean;
+  choices: OptionChoice[];
+}
+
+export interface SelectedOption {
+  groupId: string;
+  groupName: string;
+  type: 'single' | 'multi';
+  selected: string[]; // choice names
+}
+
 export interface MenuItem {
   id: string;
   name: string;
   slots: number; // aantal vakjes
   available: boolean;
   order: number;
+  optionGroups?: OptionGroup[];
 }
 
 export interface MenuCategory {
@@ -24,6 +45,8 @@ export interface OrderItem {
   quantity: number;
   slots: number;
   price: number; // slots * pricePerSlot op moment van bestelling
+  categoryName: string;
+  selectedOptions?: SelectedOption[];
 }
 
 export interface Order {

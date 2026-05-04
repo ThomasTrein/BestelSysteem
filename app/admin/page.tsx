@@ -7,10 +7,10 @@ import {
 } from 'firebase/firestore';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
-import { Event, MenuCategory, MenuItem, Table, Order } from '@/lib/types';
-import { checkAdminAuth, loginAdmin, logoutAdmin } from '@/lib/auth';
+import { Event, MenuCategory, MenuItem, Table, Order, OptionGroup, OptionChoice } from '@/lib/types';
+import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords } from '@/lib/auth';
 
-type Tab = 'evenementen' | 'menu' | 'tafels' | 'bestellingen';
+type Tab = 'evenementen' | 'menu' | 'tafels' | 'bestellingen' | 'instellingen' | 'statistieken';
 
 /* ── Dark input / card classes ── */
 const inp = 'bg-gray-700 border border-gray-600 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-400 text-sm';
@@ -24,9 +24,10 @@ export default function AdminPage() {
 
   useEffect(() => { if (checkAdminAuth()) setAuthed(true); }, []);
 
-  function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    if (loginAdmin(password)) { setAuthed(true); setLoginError(''); }
+    const ok = await loginAdmin(password);
+    if (ok) { setAuthed(true); setLoginError(''); }
     else setLoginError('Ongeldig wachtwoord.');
   }
 
@@ -49,6 +50,8 @@ export default function AdminPage() {
     { key: 'menu', label: '🍺 Menu' },
     { key: 'tafels', label: '🪑 Tafels' },
     { key: 'bestellingen', label: '📋 Bestellingen' },
+    { key: 'instellingen', label: '⚙️ Instellingen' },
+    { key: 'statistieken', label: '📊 Statistieken' },
   ];
 
   return (
@@ -74,6 +77,8 @@ export default function AdminPage() {
         {activeTab === 'menu' && <MenuTab />}
         {activeTab === 'tafels' && <TafelsTab />}
         {activeTab === 'bestellingen' && <BestellingenTab />}
+        {activeTab === 'instellingen' && <InstellingenTab />}
+        {activeTab === 'statistieken' && <StatistiekenTab />}
       </div>
     </div>
   );
@@ -307,6 +312,11 @@ function MenuTab() {
     loadMenu();
   }
 
+  async function updateItemOptionGroups(catId: string, item: MenuItem, optionGroups: OptionGroup[]) {
+    await updateDoc(doc(db, 'events', selectedEventId, 'categories', catId, 'items', item.id), { optionGroups });
+    loadMenu();
+  }
+
   return (
     <div className="space-y-6">
       <div className={card}>
@@ -343,6 +353,7 @@ function MenuTab() {
                   onToggleAvailable={(item) => toggleItemAvailable(cat.id, item)}
                   onDeleteItem={(itemId) => deleteItem(cat.id, itemId)}
                   onUpdateItem={(item, name, slots) => updateItem(cat.id, item, name, slots)}
+                  onUpdateOptionGroups={(item, groups) => updateItemOptionGroups(cat.id, item, groups)}
                 />
               ))}
               {categories.length === 0 && <p className="text-gray-500 text-center py-8">Nog geen categorieën.</p>}
@@ -354,7 +365,7 @@ function MenuTab() {
   );
 }
 
-function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, onDeleteCategory, onToggleAvailable, onDeleteItem, onUpdateItem }: {
+function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, onDeleteCategory, onToggleAvailable, onDeleteItem, onUpdateItem, onUpdateOptionGroups }: {
   cat: MenuCategory & { items: MenuItem[] };
   pricePerSlot: number;
   newItem: { name: string; slots: string; available: boolean };
@@ -364,13 +375,63 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
   onToggleAvailable: (item: MenuItem) => void;
   onDeleteItem: (id: string) => void;
   onUpdateItem: (item: MenuItem, name: string, slots: string) => void;
+  onUpdateOptionGroups: (item: MenuItem, groups: OptionGroup[]) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [editValues, setEditValues] = useState<Record<string, { name: string; slots: string }>>({});
+  const [expandedOptions, setExpandedOptions] = useState<Record<string, boolean>>({});
+  const [localOptionGroups, setLocalOptionGroups] = useState<Record<string, OptionGroup[]>>({});
+
+  function getOptionGroups(item: MenuItem): OptionGroup[] {
+    return localOptionGroups[item.id] ?? item.optionGroups ?? [];
+  }
+
+  function saveOptionGroups(item: MenuItem, groups: OptionGroup[]) {
+    setLocalOptionGroups((prev) => ({ ...prev, [item.id]: groups }));
+    onUpdateOptionGroups(item, groups);
+  }
+
+  function addOptionGroup(item: MenuItem) {
+    const groups = getOptionGroups(item);
+    const newGroup: OptionGroup = {
+      id: Date.now().toString(),
+      name: 'Nieuwe optiegroep',
+      type: 'single',
+      required: false,
+      choices: [],
+    };
+    saveOptionGroups(item, [...groups, newGroup]);
+  }
+
+  function removeOptionGroup(item: MenuItem, groupId: string) {
+    saveOptionGroups(item, getOptionGroups(item).filter((g) => g.id !== groupId));
+  }
+
+  function updateOptionGroup(item: MenuItem, groupId: string, patch: Partial<OptionGroup>) {
+    saveOptionGroups(item, getOptionGroups(item).map((g) => g.id === groupId ? { ...g, ...patch } : g));
+  }
+
+  function addChoice(item: MenuItem, groupId: string) {
+    saveOptionGroups(item, getOptionGroups(item).map((g) =>
+      g.id === groupId ? { ...g, choices: [...g.choices, { id: Date.now().toString(), name: '' }] } : g
+    ));
+  }
+
+  function updateChoice(item: MenuItem, groupId: string, choiceId: string, name: string) {
+    saveOptionGroups(item, getOptionGroups(item).map((g) =>
+      g.id === groupId ? { ...g, choices: g.choices.map((c) => c.id === choiceId ? { ...c, name } : c) } : g
+    ));
+  }
+
+  function removeChoice(item: MenuItem, groupId: string, choiceId: string) {
+    saveOptionGroups(item, getOptionGroups(item).map((g) =>
+      g.id === groupId ? { ...g, choices: g.choices.filter((c) => c.id !== choiceId) } : g
+    ));
+  }
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between p-4 bg-gray-750 border-b border-gray-700">
+      <div className="flex items-center justify-between p-4 bg-gray-700/30 border-b border-gray-700">
         <button onClick={() => setExpanded(!expanded)} className="font-bold text-white text-base flex items-center gap-2">
           {expanded ? '▾' : '▸'} {cat.name}
           <span className="text-sm font-normal text-gray-500">({cat.items.length} items)</span>
@@ -383,32 +444,95 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
           {cat.items.map((item) => {
             const ev = editValues[item.id] || { name: item.name, slots: String(item.slots || 1) };
             const price = (parseInt(ev.slots) || 0) * pricePerSlot;
+            const optGroups = getOptionGroups(item);
+            const showOpts = expandedOptions[item.id] ?? false;
             return (
-              <div key={item.id} className="flex flex-wrap gap-2 items-center bg-gray-700/50 rounded-lg p-3">
-                <input
-                  value={ev.name}
-                  onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, name: e.target.value } }))}
-                  onBlur={() => onUpdateItem(item, ev.name, ev.slots)}
-                  className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 flex-1 min-w-28 text-sm focus:outline-none"
-                />
-                <div className="flex items-center gap-1">
-                  <label className="text-gray-400 text-xs">Vakjes:</label>
+              <div key={item.id} className="bg-gray-700/50 rounded-lg p-3 space-y-2">
+                <div className="flex flex-wrap gap-2 items-center">
                   <input
-                    type="number" min="1" step="1"
-                    value={ev.slots}
-                    onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, slots: e.target.value } }))}
+                    value={ev.name}
+                    onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, name: e.target.value } }))}
                     onBlur={() => onUpdateItem(item, ev.name, ev.slots)}
-                    className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 w-16 text-sm focus:outline-none text-center"
+                    className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 flex-1 min-w-28 text-sm focus:outline-none"
                   />
+                  <div className="flex items-center gap-1">
+                    <label className="text-gray-400 text-xs">Vakjes:</label>
+                    <input
+                      type="number" min="1" step="1"
+                      value={ev.slots}
+                      onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, slots: e.target.value } }))}
+                      onBlur={() => onUpdateItem(item, ev.name, ev.slots)}
+                      className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 w-16 text-sm focus:outline-none text-center"
+                    />
+                  </div>
+                  {pricePerSlot > 0 && (
+                    <span className="text-green-400 text-xs">€{price.toFixed(2)}</span>
+                  )}
+                  <label className="flex items-center gap-1 text-sm text-gray-400 cursor-pointer">
+                    <input type="checkbox" checked={item.available} onChange={() => onToggleAvailable(item)} className="rounded" />
+                    Beschikbaar
+                  </label>
+                  <button
+                    onClick={() => setExpandedOptions((prev) => ({ ...prev, [item.id]: !showOpts }))}
+                    className={`text-xs font-semibold px-2 py-1 rounded transition-colors ${showOpts ? 'bg-blue-600/30 text-blue-400' : 'bg-gray-600 text-gray-400 hover:text-white'}`}
+                  >
+                    ⚙ Opties {optGroups.length > 0 ? `(${optGroups.length})` : ''}
+                  </button>
+                  <button onClick={() => onDeleteItem(item.id)} className="text-red-400 hover:text-red-300 text-sm">✕</button>
                 </div>
-                {pricePerSlot > 0 && (
-                  <span className="text-green-400 text-xs">€{price.toFixed(2)}</span>
+
+                {showOpts && (
+                  <div className="border-t border-gray-600 pt-2 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider">Optiegroepen</p>
+                      <button onClick={() => addOptionGroup(item)} className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-2 py-1 rounded transition-colors">
+                        + Groep toevoegen
+                      </button>
+                    </div>
+                    {optGroups.length === 0 && <p className="text-gray-600 text-xs">Geen optiegroepen</p>}
+                    {optGroups.map((group) => (
+                      <div key={group.id} className="bg-gray-800 rounded-lg p-3 space-y-2 border border-gray-600">
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <input
+                            value={group.name}
+                            onChange={(e) => updateOptionGroup(item, group.id, { name: e.target.value })}
+                            className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 flex-1 min-w-24 text-sm focus:outline-none"
+                            placeholder="Groepsnaam"
+                          />
+                          <select
+                            value={group.type}
+                            onChange={(e) => updateOptionGroup(item, group.id, { type: e.target.value as 'single' | 'multi' })}
+                            className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs focus:outline-none"
+                          >
+                            <option value="single">Enkelvoudig</option>
+                            <option value="multi">Meervoudig</option>
+                          </select>
+                          <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer">
+                            <input type="checkbox" checked={group.required} onChange={(e) => updateOptionGroup(item, group.id, { required: e.target.checked })} className="rounded" />
+                            Verplicht
+                          </label>
+                          <button onClick={() => removeOptionGroup(item, group.id)} className="text-red-400 hover:text-red-300 text-xs">✕ Verwijder groep</button>
+                        </div>
+                        <div className="space-y-1 pl-2">
+                          {group.choices.map((choice) => (
+                            <div key={choice.id} className="flex gap-2 items-center">
+                              <input
+                                value={choice.name}
+                                onChange={(e) => updateChoice(item, group.id, choice.id, e.target.value)}
+                                className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 flex-1 text-xs focus:outline-none"
+                                placeholder="Keuzenaam"
+                              />
+                              <button onClick={() => removeChoice(item, group.id, choice.id)} className="text-red-400 hover:text-red-300 text-xs">✕</button>
+                            </div>
+                          ))}
+                          <button onClick={() => addChoice(item, group.id)} className="text-xs text-blue-400 hover:text-blue-300 mt-1">
+                            + Keuze toevoegen
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-                <label className="flex items-center gap-1 text-sm text-gray-400 cursor-pointer">
-                  <input type="checkbox" checked={item.available} onChange={() => onToggleAvailable(item)} className="rounded" />
-                  Beschikbaar
-                </label>
-                <button onClick={() => onDeleteItem(item.id)} className="text-red-400 hover:text-red-300 text-sm">✕</button>
               </div>
             );
           })}
@@ -734,6 +858,192 @@ function Spinner() {
   return (
     <div className="flex justify-center py-8">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+    </div>
+  );
+}
+
+/* ── Instellingen Tab ── */
+function InstellingenTab() {
+  const [barPw, setBarPw] = useState('');
+  const [adminPw, setAdminPw] = useState('');
+  const [adminPwConfirm, setAdminPwConfirm] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!barPw.trim() && !adminPw.trim()) {
+      setMessage({ type: 'error', text: 'Vul minstens één wachtwoord in.' });
+      return;
+    }
+    if (adminPw && adminPw !== adminPwConfirm) {
+      setMessage({ type: 'error', text: 'Admin wachtwoorden komen niet overeen.' });
+      return;
+    }
+    setSaving(true);
+    try {
+      // Read current passwords from Firestore to keep the ones not being changed
+      const { doc: firestoreDoc, getDoc: firestoreGetDoc } = await import('firebase/firestore');
+      const { db: firestoreDb } = await import('@/lib/firebase');
+      const snap = await firestoreGetDoc(firestoreDoc(firestoreDb, 'settings', 'passwords'));
+      const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string } : {};
+      const newBar = barPw.trim() || current.barPassword || '';
+      const newAdmin = adminPw.trim() || current.adminPassword || '';
+      await updatePasswords(newBar, newAdmin);
+      setMessage({ type: 'success', text: 'Wachtwoorden opgeslagen!' });
+      setBarPw(''); setAdminPw(''); setAdminPwConfirm('');
+    } catch {
+      setMessage({ type: 'error', text: 'Fout bij opslaan. Probeer opnieuw.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6 max-w-md">
+      <div className={card}>
+        <h2 className="text-lg font-bold text-white mb-4">🔑 Wachtwoorden wijzigen</h2>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">Nieuw barwachtwoord</label>
+            <input type="password" value={barPw} onChange={(e) => setBarPw(e.target.value)} placeholder="Leeg laten om niet te wijzigen" className={inp + ' w-full'} />
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">Nieuw adminwachtwoord</label>
+            <input type="password" value={adminPw} onChange={(e) => setAdminPw(e.target.value)} placeholder="Leeg laten om niet te wijzigen" className={inp + ' w-full'} />
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">Bevestig adminwachtwoord</label>
+            <input type="password" value={adminPwConfirm} onChange={(e) => setAdminPwConfirm(e.target.value)} placeholder="Herhaal adminwachtwoord" className={inp + ' w-full'} />
+          </div>
+          {message && (
+            <p className={`text-sm font-medium ${message.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+              {message.text}
+            </p>
+          )}
+          <button type="submit" disabled={saving} className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition-colors">
+            {saving ? 'Opslaan...' : 'Wachtwoorden opslaan'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ── Statistieken Tab ── */
+function StatistiekenTab() {
+  const [events, setEvents] = useState<Event[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState('');
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
+      const evs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event));
+      setEvents(evs);
+      const active = evs.find((e) => e.active);
+      if (active) { setSelectedEventId(active.id); setSelectedEvent(active); }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (selectedEventId) {
+      const ev = events.find((e) => e.id === selectedEventId);
+      setSelectedEvent(ev || null);
+      loadOrders();
+    }
+  }, [selectedEventId]);
+
+  async function loadOrders() {
+    setLoading(true);
+    const snap = await getDocs(query(collection(db, 'events', selectedEventId, 'orders'), orderBy('createdAt', 'desc')));
+    setOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order)));
+    setLoading(false);
+  }
+
+  const pricePerSlot = selectedEvent?.pricePerSlot || 0;
+  const itemMap: Record<string, { name: string; qty: number; vakjes: number }> = {};
+  for (const order of orders) {
+    for (const item of order.items) {
+      if (!itemMap[item.name]) itemMap[item.name] = { name: item.name, qty: 0, vakjes: 0 };
+      itemMap[item.name].qty += item.quantity;
+      itemMap[item.name].vakjes += (item.slots || 0) * item.quantity;
+    }
+  }
+  const summaryItems = Object.values(itemMap).sort((a, b) => b.qty - a.qty);
+  const totalVakjes = summaryItems.reduce((s, i) => s + i.vakjes, 0);
+  const totalQty = summaryItems.reduce((s, i) => s + i.qty, 0);
+  const totalWaarde = totalVakjes * pricePerSlot;
+  const totalDrankkaarten = orders.reduce((s, o) => s + (o.drankkaarten || 0), 0);
+
+  return (
+    <div className="space-y-6">
+      <div className={card}>
+        <label className="block text-sm font-semibold text-gray-300 mb-2">Evenement</label>
+        <div className="flex flex-wrap gap-3 items-end">
+          <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)} className={inp + ' flex-1 max-w-xs'}>
+            <option value="">Selecteer evenement...</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}{ev.active ? ' (Actief)' : ''}</option>)}
+          </select>
+          {selectedEventId && (
+            <button onClick={loadOrders} className="bg-gray-700 hover:bg-gray-600 text-gray-300 py-2 px-4 rounded-lg text-sm transition-colors">
+              ↻ Vernieuwen
+            </button>
+          )}
+        </div>
+      </div>
+
+      {selectedEventId && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="Bestellingen" value={String(orders.length)} />
+            <StatCard label="Items totaal" value={String(totalQty)} />
+            <StatCard label="Drankkaarten" value={String(totalDrankkaarten)} />
+            <StatCard label="Totale waarde" value={`€${totalWaarde.toFixed(2)}`} />
+          </div>
+
+          {loading ? <Spinner /> : summaryItems.length > 0 ? (
+            <div className={card}>
+              <h3 className="font-bold text-white mb-3">📊 Per item</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="text-left text-gray-400 py-2 pr-4">Item naam</th>
+                      <th className="text-right text-gray-400 py-2 px-2">Aantal</th>
+                      <th className="text-right text-gray-400 py-2 px-2">Vakjes totaal</th>
+                      {pricePerSlot > 0 && <th className="text-right text-gray-400 py-2 pl-2">Waarde</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summaryItems.map((item) => (
+                      <tr key={item.name} className="border-b border-gray-700/50">
+                        <td className="text-white py-2 pr-4">{item.name}</td>
+                        <td className="text-right text-gray-300 py-2 px-2 font-semibold">{item.qty}</td>
+                        <td className="text-right text-gray-400 py-2 px-2">{item.vakjes}</td>
+                        {pricePerSlot > 0 && (
+                          <td className="text-right text-green-400 py-2 pl-2">€{(item.vakjes * pricePerSlot).toFixed(2)}</td>
+                        )}
+                      </tr>
+                    ))}
+                    <tr className="border-t-2 border-gray-600 font-bold">
+                      <td className="text-white py-2 pr-4">Totaal</td>
+                      <td className="text-right text-white py-2 px-2">{totalQty}</td>
+                      <td className="text-right text-white py-2 px-2">{totalVakjes}</td>
+                      {pricePerSlot > 0 && (
+                        <td className="text-right text-green-400 py-2 pl-2">€{totalWaarde.toFixed(2)}</td>
+                      )}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <p className="text-gray-500 text-center py-8">Geen bestellingen gevonden.</p>
+          )}
+        </>
+      )}
     </div>
   );
 }
