@@ -75,6 +75,9 @@ export default function BarPage() {
   if (!authed) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
       <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-xl p-8 w-full max-w-sm">
+        <a href="/" className="flex items-center gap-2 text-gray-400 hover:text-white text-sm mb-6 transition-colors">
+          ← Terug naar home
+        </a>
         <h1 className="text-2xl font-bold text-white mb-2 text-center">🍹 Barscherm</h1>
         <p className="text-gray-400 text-center mb-6">Log in om bestellingen te bekijken</p>
         <form onSubmit={handleLogin} className="space-y-4">
@@ -88,8 +91,8 @@ export default function BarPage() {
     </div>
   );
 
-  const besteld = orders.filter((o) => o.status === 'besteld');
-  const klaar = orders.filter((o) => o.status === 'klaar');
+  const besteld = orders.filter((o) => o.status === 'besteld'); // oldest first from Firestore asc
+  const klaar = [...orders.filter((o) => o.status === 'klaar')].reverse(); // newest first
 
   const colClass: Record<number, string> = {
     1: 'grid-cols-1',
@@ -209,6 +212,7 @@ function OrderCard({ order, fmt, onToggle }: { order: Order; fmt: (t: any) => st
       <div className="flex justify-between items-start mb-3">
         <div>
           <p className="text-2xl font-bold text-white">{order.tableName}</p>
+          {order.customerName && <p className="text-gray-300 text-sm font-medium">👤 {order.customerName}</p>}
           <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
         </div>
         <button

@@ -34,6 +34,9 @@ export default function AdminPage() {
   if (!authed) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
       <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-xl p-8 w-full max-w-sm">
+        <a href="/" className="flex items-center gap-2 text-gray-400 hover:text-white text-sm mb-6 transition-colors">
+          ← Terug naar home
+        </a>
         <h1 className="text-2xl font-bold text-white mb-2 text-center">⚙️ Admin</h1>
         <p className="text-gray-400 text-center mb-6">Beheerpaneel voor KSA Bestelapp</p>
         <form onSubmit={handleLogin} className="space-y-4">
@@ -698,6 +701,7 @@ function BestellingenTab() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'alle' | 'besteld' | 'klaar'>('alle');
+  const [nameFilter, setNameFilter] = useState('');
 
   useEffect(() => {
     getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
@@ -729,22 +733,16 @@ function BestellingenTab() {
     catch { return ''; }
   }
 
-  const filtered = orders.filter((o) => filter === 'alle' || o.status === filter);
-
-  // Per-item summary
-  const itemSummary: Record<string, { name: string; qty: number; vakjes: number }> = {};
-  for (const order of orders) {
-    for (const item of order.items) {
-      if (!itemSummary[item.name]) itemSummary[item.name] = { name: item.name, qty: 0, vakjes: 0 };
-      itemSummary[item.name].qty += item.quantity;
-      itemSummary[item.name].vakjes += (item.slots || 0) * item.quantity;
+  const filtered = orders.filter((o) => {
+    if (filter !== 'alle' && o.status !== filter) return false;
+    const search = nameFilter.trim().toLowerCase();
+    if (search) {
+      const inName = o.customerName?.toLowerCase().includes(search) ?? false;
+      const inTable = o.tableName?.toLowerCase().includes(search) ?? false;
+      if (!inName && !inTable) return false;
     }
-  }
-  const summaryItems = Object.values(itemSummary).sort((a, b) => b.qty - a.qty);
-
-  const totalDrankkaarten = orders.reduce((s, o) => s + (o.drankkaarten || 0), 0);
-  const totalVakjes = orders.reduce((s, o) => s + o.items.reduce((ss, i) => ss + (i.slots || 0) * i.quantity, 0), 0);
-  const totalWaarde = totalVakjes * (selectedEvent?.pricePerSlot || 0);
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -761,52 +759,21 @@ function BestellingenTab() {
 
       {selectedEventId && (
         <>
-          {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label="Bestellingen" value={String(orders.length)} />
-            <StatCard label="Drankkaarten" value={String(totalDrankkaarten)} />
-            <StatCard label="Totaal vakjes" value={String(totalVakjes)} />
-            <StatCard label="Totale waarde" value={`€${totalWaarde.toFixed(2)}`} />
-          </div>
-
-          {/* Per-item summary */}
-          {summaryItems.length > 0 && (
-            <div className={card}>
-              <h3 className="font-bold text-white mb-3">📊 Samenvatting per item</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-700">
-                      <th className="text-left text-gray-400 py-2 pr-4">Item</th>
-                      <th className="text-right text-gray-400 py-2 px-2">Aantal</th>
-                      <th className="text-right text-gray-400 py-2 px-2">Vakjes</th>
-                      {(selectedEvent?.pricePerSlot || 0) > 0 && <th className="text-right text-gray-400 py-2 pl-2">Waarde</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryItems.map((item) => (
-                      <tr key={item.name} className="border-b border-gray-700/50">
-                        <td className="text-white py-2 pr-4">{item.name}</td>
-                        <td className="text-right text-gray-300 py-2 px-2 font-semibold">{item.qty}×</td>
-                        <td className="text-right text-gray-400 py-2 px-2">{item.vakjes}</td>
-                        {(selectedEvent?.pricePerSlot || 0) > 0 && (
-                          <td className="text-right text-green-400 py-2 pl-2">€{(item.vakjes * (selectedEvent?.pricePerSlot || 0)).toFixed(2)}</td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {/* Filters */}
+          <div className="flex flex-wrap gap-3 items-center">
+            <div className="flex gap-2">
+              {(['alle', 'besteld', 'klaar'] as const).map((f) => (
+                <button key={f} onClick={() => setFilter(f)} className={`py-1.5 px-4 rounded-lg text-sm font-semibold transition-colors capitalize ${filter === f ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700'}`}>
+                  {f === 'alle' ? 'Alle' : f === 'besteld' ? 'Besteld' : 'Klaar'}
+                </button>
+              ))}
             </div>
-          )}
-
-          {/* Filter */}
-          <div className="flex gap-2">
-            {(['alle', 'besteld', 'klaar'] as const).map((f) => (
-              <button key={f} onClick={() => setFilter(f)} className={`py-1.5 px-4 rounded-lg text-sm font-semibold transition-colors capitalize ${filter === f ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700'}`}>
-                {f === 'alle' ? 'Alle' : f === 'besteld' ? 'Besteld' : 'Klaar'}
-              </button>
-            ))}
+            <input
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+              placeholder="🔍 Zoek op naam of tafel..."
+              className={inp + ' flex-1 min-w-[200px]'}
+            />
           </div>
 
           {loading ? <Spinner /> : (
@@ -816,6 +783,7 @@ function BestellingenTab() {
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <p className="font-bold text-white text-lg">{order.tableName}</p>
+                      {order.customerName && <p className="text-gray-300 text-sm font-medium">👤 {order.customerName}</p>}
                       <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
                     </div>
                     <span className={`text-xs font-bold px-3 py-1 rounded-full ${order.status === 'besteld' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>

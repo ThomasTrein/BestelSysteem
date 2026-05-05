@@ -53,6 +53,7 @@ export interface Order {
   id: string;
   tableId: string;
   tableName: string;
+  customerName?: string;
   items: OrderItem[];
   drankkaarten: number;
   note: string;

@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
@@ -14,7 +13,7 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Event, MenuCategory, MenuItem, Table, OrderItem, OptionGroup, SelectedOption } from '@/lib/types';
+import { Event, MenuCategory, MenuItem, Table, OrderItem, SelectedOption } from '@/lib/types';
 import QuantitySelector from '@/components/QuantitySelector';
 
 interface CategoryWithItems extends MenuCategory {
@@ -44,6 +43,10 @@ export default function TafelPage() {
   const [event, setEvent] = useState<Event | null>(null);
   const [table, setTable] = useState<Table | null>(null);
   const [categories, setCategories] = useState<CategoryWithItems[]>([]);
+
+  const [customerName, setCustomerName] = useState('');
+  const [nameDone, setNameDone] = useState(false);
+
   const [simpleQty, setSimpleQty] = useState<Record<string, number>>({});
   const [optionEntries, setOptionEntries] = useState<OptionEntry[]>([]);
   const [drankkaarten, setDrankkaarten] = useState(0);
@@ -51,12 +54,13 @@ export default function TafelPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  // Modal state
   const [modalItem, setModalItem] = useState<MenuItem | null>(null);
   const [modalCategoryName, setModalCategoryName] = useState('');
   const [modalCategoryId, setModalCategoryId] = useState('');
   const [modalSelections, setModalSelections] = useState<Record<string, string[]>>({});
   const [modalError, setModalError] = useState('');
+
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => { loadData(); }, [tafelId]);
 
@@ -64,8 +68,7 @@ export default function TafelPage() {
     try {
       setLoading(true);
       setError(null);
-      const eventsQuery = query(collection(db, 'events'), where('active', '==', true));
-      const eventsSnap = await getDocs(eventsQuery);
+      const eventsSnap = await getDocs(query(collection(db, 'events'), where('active', '==', true)));
       if (eventsSnap.empty) { setError('Er is momenteel geen actief evenement.'); setLoading(false); return; }
       const eventDoc = eventsSnap.docs[0];
       const eventData = { id: eventDoc.id, ...eventDoc.data() } as Event;
@@ -73,12 +76,10 @@ export default function TafelPage() {
       const tableDoc = await getDoc(doc(db, 'events', eventData.id, 'tables', tafelId));
       if (!tableDoc.exists()) { setError('Tafel niet gevonden. Controleer de QR-code.'); setLoading(false); return; }
       setTable({ id: tableDoc.id, ...tableDoc.data() } as Table);
-      const catsQuery = query(collection(db, 'events', eventData.id, 'categories'), orderBy('order'));
-      const catsSnap = await getDocs(catsQuery);
+      const catsSnap = await getDocs(query(collection(db, 'events', eventData.id, 'categories'), orderBy('order')));
       const cats: CategoryWithItems[] = [];
       for (const catDoc of catsSnap.docs) {
-        const itemsQuery = query(collection(db, 'events', eventData.id, 'categories', catDoc.id, 'items'), orderBy('order'));
-        const itemsSnap = await getDocs(itemsQuery);
+        const itemsSnap = await getDocs(query(collection(db, 'events', eventData.id, 'categories', catDoc.id, 'items'), orderBy('order')));
         const items: MenuItem[] = itemsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MenuItem)).filter((item) => item.available);
         if (items.length > 0) cats.push({ id: catDoc.id, ...(catDoc.data() as Omit<MenuCategory, 'id' | 'items'>), items });
       }
@@ -104,7 +105,6 @@ export default function TafelPage() {
       if (newValue > current) {
         openModal(item, cat);
       } else {
-        // Remove last entry for this item
         setOptionEntries((prev) => {
           const idx = [...prev].map((e, i) => ({ e, i })).reverse().find(({ e }) => e.itemId === item.id)?.i;
           if (idx === undefined) return prev;
@@ -156,8 +156,6 @@ export default function TafelPage() {
       type: group.type,
       selected: modalSelections[group.id] || [],
     })).filter((o) => o.selected.length > 0 || groups.find((g) => g.id === o.groupId)?.required);
-
-    const pricePerSlot = event?.pricePerSlot || 0;
     const entry: OptionEntry = {
       uid: Date.now().toString() + Math.random().toString(36).slice(2),
       itemId: modalItem.id,
@@ -175,8 +173,6 @@ export default function TafelPage() {
     if (!event || !table) return;
     const pricePerSlot = event.pricePerSlot || 0;
     const orderItems: OrderItem[] = [];
-
-    // Simple items
     for (const cat of categories) {
       for (const item of cat.items) {
         const qty = simpleQty[item.id] || 0;
@@ -185,8 +181,6 @@ export default function TafelPage() {
         }
       }
     }
-
-    // Option items - group by itemId + options key
     const grouped = new Map<string, OptionEntry[]>();
     for (const entry of optionEntries) {
       const key = entry.itemId + '|' + buildOptionsKey(entry.selectedOptions);
@@ -205,16 +199,17 @@ export default function TafelPage() {
         selectedOptions: first.selectedOptions,
       });
     }
-
     if (orderItems.length === 0 && drankkaarten === 0) {
-      alert('Voeg minstens één item of drankkaart toe aan je bestelling.');
+      alert('Voeg minstens een item of drankkaart toe.');
       return;
     }
+    setShowConfirm(false);
     try {
       setSubmitting(true);
       await addDoc(collection(db, 'events', event.id, 'orders'), {
         tableId: tafelId,
         tableName: table.name,
+        customerName: customerName.trim(),
         items: orderItems,
         drankkaarten,
         note,
@@ -236,6 +231,8 @@ export default function TafelPage() {
     setDrankkaarten(0);
     setNote('');
     setSuccess(false);
+    setNameDone(false);
+    setCustomerName('');
   }
 
   const accent = event?.accentColor || '#16a34a';
@@ -264,7 +261,7 @@ export default function TafelPage() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: `linear-gradient(135deg, ${accent}dd, ${accent}99)` }}>
       <div className="text-center text-white">
         <div className="text-7xl mb-6">🎉</div>
-        <h1 className="text-3xl font-bold mb-3">Bedankt!</h1>
+        <h1 className="text-3xl font-bold mb-3">Bedankt, {customerName}!</h1>
         <p className="text-white/80 text-lg mb-8">Je bestelling is geplaatst.</p>
         <button onClick={resetOrder} className="bg-white font-semibold py-3 px-8 rounded-xl hover:bg-white/90 transition-colors shadow-lg" style={{ color: accent }}>
           Nieuwe bestelling
@@ -273,9 +270,40 @@ export default function TafelPage() {
     </div>
   );
 
+  if (!nameDone) return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
+      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
+        <div className="text-center mb-6">
+          <div className="text-5xl mb-3">👋</div>
+          <h1 className="text-2xl font-bold text-gray-800">{event?.name}</h1>
+          <p className="text-gray-500 mt-1">Tafel {table?.name}</p>
+        </div>
+        <p className="text-gray-700 font-medium mb-4 text-center">Wat is je naam?</p>
+        <form onSubmit={(e) => { e.preventDefault(); if (customerName.trim()) setNameDone(true); }} className="space-y-4">
+          <input
+            type="text"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Voer je naam in..."
+            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 text-lg focus:outline-none placeholder-gray-300"
+            autoFocus
+            maxLength={50}
+          />
+          <button
+            type="submit"
+            disabled={!customerName.trim()}
+            className="w-full text-white font-bold py-3 rounded-xl transition-opacity disabled:opacity-40 text-lg"
+            style={{ backgroundColor: accent }}
+          >
+            Doorgaan →
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Options Modal */}
       {modalItem && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/60" onClick={closeModal} />
@@ -298,8 +326,8 @@ export default function TafelPage() {
                       return (
                         <label
                           key={choice.id}
-                          className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${isSelected ? 'border-current bg-opacity-5' : 'border-gray-200 hover:border-gray-300'}`}
-                          style={isSelected ? { borderColor: accent, backgroundColor: accent + '10' } : {}}
+                          className="flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors"
+                          style={isSelected ? { borderColor: accent, backgroundColor: accent + '10' } : { borderColor: '#e5e7eb' }}
                         >
                           <input
                             type={group.type === 'single' ? 'radio' : 'checkbox'}
@@ -308,8 +336,16 @@ export default function TafelPage() {
                             onChange={() => group.type === 'single' ? toggleSingle(group.id, choice.name) : toggleMulti(group.id, choice.name)}
                             className="sr-only"
                           />
-                          <div className={`w-5 h-5 rounded-${group.type === 'single' ? 'full' : 'md'} border-2 flex items-center justify-center transition-colors ${isSelected ? 'border-current' : 'border-gray-300'}`} style={isSelected ? { borderColor: accent } : {}}>
-                            {isSelected && <div className={`w-2.5 h-2.5 rounded-${group.type === 'single' ? 'full' : 'sm'}`} style={{ backgroundColor: accent }} />}
+                          <div
+                            className={`w-5 h-5 border-2 flex items-center justify-center transition-colors ${group.type === 'single' ? 'rounded-full' : 'rounded-md'}`}
+                            style={isSelected ? { borderColor: accent } : { borderColor: '#d1d5db' }}
+                          >
+                            {isSelected && (
+                              <div
+                                className={`w-2.5 h-2.5 ${group.type === 'single' ? 'rounded-full' : 'rounded-sm'}`}
+                                style={{ backgroundColor: accent }}
+                              />
+                            )}
                           </div>
                           <span className="text-gray-800 font-medium">{choice.name}</span>
                         </label>
@@ -332,12 +368,35 @@ export default function TafelPage() {
         </div>
       )}
 
-      {/* Header */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowConfirm(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="text-4xl mb-4">🛒</div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Bestelling bevestigen</h2>
+            <p className="text-gray-600 mb-6">Heb je alles besteld wat je wil?</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowConfirm(false)} className="flex-1 py-3 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors">
+                Nog even kijken
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="flex-1 py-3 rounded-xl text-white font-bold transition-opacity hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: accent }}
+              >
+                {submitting ? 'Bezig...' : 'Ja, bevestigen!'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="text-white px-4 py-4 sticky top-0 z-10 shadow-md" style={{ backgroundColor: accent }}>
         <div className="max-w-2xl mx-auto flex justify-between items-center">
           <div>
             <h1 className="text-xl font-bold">🍺 {event?.name}</h1>
-            <p className="text-white/70 text-sm">Tafel: {table?.name}</p>
+            <p className="text-white/70 text-sm">Tafel: {table?.name} · {customerName}</p>
           </div>
           {totalSelected > 0 && (
             <span className="bg-white/20 text-white font-bold rounded-full px-3 py-1 text-sm border border-white/30">
@@ -383,7 +442,6 @@ export default function TafelPage() {
                         accent={accent}
                       />
                     </div>
-                    {/* Show option entries for this item */}
                     {hasOptions && itemEntries.length > 0 && (
                       <div className="mt-3 space-y-1.5 border-t border-gray-100 pt-2">
                         {itemEntries.map((entry, idx) => (
@@ -413,7 +471,6 @@ export default function TafelPage() {
           </section>
         ))}
 
-        {/* Drankkaarten */}
         <section>
           <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
             Drankkaarten
@@ -427,7 +484,6 @@ export default function TafelPage() {
           </div>
         </section>
 
-        {/* Opmerking */}
         <section>
           <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
             Opmerking
@@ -437,19 +493,23 @@ export default function TafelPage() {
             onChange={(e) => setNote(e.target.value)}
             placeholder="Eventuele opmerkingen (allergieën, speciale wensen...)"
             className="w-full bg-white rounded-xl p-4 shadow-sm border border-gray-200 resize-none text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2"
-            style={{ '--tw-ring-color': accent } as React.CSSProperties}
             rows={3}
           />
         </section>
 
-        {/* Submit */}
         <button
-          onClick={handleSubmit}
+          onClick={() => {
+            if (totalSelected === 0) {
+              alert('Voeg minstens een item of drankkaart toe.');
+              return;
+            }
+            setShowConfirm(true);
+          }}
           disabled={submitting || totalSelected === 0}
           className="w-full text-white font-bold py-4 px-6 rounded-xl transition-opacity shadow-lg text-lg mb-8 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ backgroundColor: accent }}
         >
-          {submitting ? 'Bezig...' : '🛒 Bestelling plaatsen'}
+          🛒 Bestelling plaatsen
         </button>
       </main>
     </div>
