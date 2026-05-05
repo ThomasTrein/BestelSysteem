@@ -3,18 +3,23 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   collection, getDocs, addDoc, deleteDoc, doc, updateDoc,
-  query, orderBy, where, writeBatch, Timestamp,
+  query, orderBy, where, writeBatch, Timestamp, onSnapshot,
 } from 'firebase/firestore';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
-import { Event, MenuCategory, MenuItem, Table, Order, OptionGroup, OptionChoice } from '@/lib/types';
+import { Event, MenuCategory, MenuItem, Table, Order, OptionGroup, OptionChoice, BarScreen } from '@/lib/types';
 import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords } from '@/lib/auth';
 
-type Tab = 'evenementen' | 'menu' | 'tafels' | 'bestellingen' | 'instellingen' | 'statistieken';
+type Tab = 'evenementen' | 'menu' | 'tafels' | 'bestellingen' | 'instellingen' | 'statistieken' | 'schermen';
 
-/* ── Dark input / card classes ── */
 const inp = 'bg-gray-700 border border-gray-600 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-400 text-sm';
 const card = 'bg-gray-800 border border-gray-700 rounded-xl p-4';
+
+function fmt(t: unknown): string {
+  if (!t) return '';
+  try { return (t instanceof Timestamp ? t.toDate() : new Date(t as string)).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }); }
+  catch { return ''; }
+}
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
@@ -51,8 +56,9 @@ export default function AdminPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'evenementen', label: '📅 Evenementen' },
     { key: 'menu', label: '🍺 Menu' },
-    { key: 'tafels', label: '🪑 Tafels' },
+    { key: 'tafels', label: '切 Tafels' },
     { key: 'bestellingen', label: '📋 Bestellingen' },
+    { key: 'schermen', label: '🖥️ Schermen' },
     { key: 'instellingen', label: '⚙️ Instellingen' },
     { key: 'statistieken', label: '📊 Statistieken' },
   ];
@@ -81,13 +87,14 @@ export default function AdminPage() {
         {activeTab === 'tafels' && <TafelsTab />}
         {activeTab === 'bestellingen' && <BestellingenTab />}
         {activeTab === 'instellingen' && <InstellingenTab />}
+        {activeTab === 'schermen' && <SchermenTab />}
         {activeTab === 'statistieken' && <StatistiekenTab />}
       </div>
     </div>
   );
 }
 
-/* ── Evenementen Tab ── */
+/* -- Evenementen Tab -- */
 function EvenementenTab() {
   const [events, setEvents] = useState<Event[]>([]);
   const [newName, setNewName] = useState('');
@@ -95,15 +102,15 @@ function EvenementenTab() {
   const [newEnd, setNewEnd] = useState('');
   const [newPricePerSlot, setNewPricePerSlot] = useState('');
   const [newAccent, setNewAccent] = useState('#16a34a');
-  const [loading, setLoading] = useState(true);
+  const [newDrankkaartSlots, setNewDrankkaartSlots] = useState('20');
+  const [newQrLabel, setNewQrLabel] = useState('Scan om te bestellen');
 
-  useEffect(() => { load(); }, []);
-
-  async function load() {
-    const snap = await getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc')));
-    setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event)));
-    setLoading(false);
-  }
+  useEffect(() => {
+    const unsub = onSnapshot(query(collection(db, 'events'), orderBy('startDate', 'desc')), (snap) => {
+      setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event)));
+    });
+    return () => unsub();
+  }, []);
 
   async function createEvent(e: React.FormEvent) {
     e.preventDefault();
@@ -116,35 +123,30 @@ function EvenementenTab() {
       showPrices: true,
       pricePerSlot: parseFloat(newPricePerSlot) || 0,
       accentColor: newAccent,
+      drankkaartSlots: parseInt(newDrankkaartSlots) || 20,
+      qrLabel: newQrLabel.trim() || 'Scan om te bestellen',
     });
-    setNewName(''); setNewStart(''); setNewEnd(''); setNewPricePerSlot(''); setNewAccent('#16a34a');
-    load();
+    setNewName(''); setNewStart(''); setNewEnd(''); setNewPricePerSlot(''); setNewAccent('#16a34a'); setNewDrankkaartSlots('20'); setNewQrLabel('Scan om te bestellen');
   }
 
   async function activateEvent(id: string) {
     const batch = writeBatch(db);
     events.forEach((ev) => batch.update(doc(db, 'events', ev.id), { active: ev.id === id }));
     await batch.commit();
-    load();
   }
 
   async function deactivateEvent(id: string) {
     await updateDoc(doc(db, 'events', id), { active: false });
-    load();
   }
 
   async function deleteEvent(id: string) {
     if (!confirm('Zeker? Dit verwijdert het evenement.')) return;
     await deleteDoc(doc(db, 'events', id));
-    load();
   }
 
   async function updateEventField(ev: Event, field: Partial<Event>) {
     await updateDoc(doc(db, 'events', ev.id), field as any);
-    load();
   }
-
-  if (loading) return <Spinner />;
 
   return (
     <div className="space-y-6">
@@ -170,6 +172,14 @@ function EvenementenTab() {
               <input type="color" value={newAccent} onChange={(e) => setNewAccent(e.target.value)} className="w-10 h-9 rounded cursor-pointer border-0 bg-transparent" />
               <input value={newAccent} onChange={(e) => setNewAccent(e.target.value)} placeholder="#16a34a" className={inp + ' flex-1 font-mono'} maxLength={7} />
             </div>
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">Vakjes per drankkaart</label>
+            <input type="number" min="1" value={newDrankkaartSlots} onChange={(e) => setNewDrankkaartSlots(e.target.value)} placeholder="20" className={inp + ' w-full'} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-gray-400 text-xs mb-1 block">QR code label (tekst onder QR bij afdrukken)</label>
+            <input value={newQrLabel} onChange={(e) => setNewQrLabel(e.target.value)} placeholder="Scan om te bestellen" className={inp + ' w-full'} />
           </div>
           <button type="submit" className="sm:col-span-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
             Aanmaken
@@ -213,7 +223,6 @@ function EvenementenTab() {
                 </button>
               </div>
             </div>
-            {/* Inline edit accentcolor & pricePerSlot */}
             <div className="flex flex-wrap gap-3 pt-2 border-t border-gray-700">
               <div className="flex items-center gap-2">
                 <label className="text-gray-400 text-xs">Accentkleur:</label>
@@ -224,6 +233,14 @@ function EvenementenTab() {
                 <label className="text-gray-400 text-xs">€/vakje:</label>
                 <input type="number" step="0.01" min="0" defaultValue={ev.pricePerSlot || 0} onBlur={(e) => updateEventField(ev, { pricePerSlot: parseFloat(e.target.value) || 0 })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs w-20 focus:outline-none" />
               </div>
+              <div className="flex items-center gap-2">
+                <label className="text-gray-400 text-xs">Vakjes/drankkaart:</label>
+                <input type="number" min="1" defaultValue={ev.drankkaartSlots || 20} onBlur={(e) => updateEventField(ev, { drankkaartSlots: parseInt(e.target.value) || 20 })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs w-20 focus:outline-none" />
+              </div>
+              <div className="flex items-center gap-2 w-full">
+                <label className="text-gray-400 text-xs shrink-0">QR label:</label>
+                <input defaultValue={ev.qrLabel || 'Scan om te bestellen'} onBlur={(e) => updateEventField(ev, { qrLabel: e.target.value.trim() || 'Scan om te bestellen' })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs flex-1 focus:outline-none" placeholder="Scan om te bestellen" />
+              </div>
             </div>
           </div>
         ))}
@@ -233,7 +250,7 @@ function EvenementenTab() {
   );
 }
 
-/* ── Menu Tab ── */
+/* -- Menu Tab -- */
 function MenuTab() {
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEventId, setSelectedEventId] = useState('');
@@ -253,23 +270,48 @@ function MenuTab() {
   }, []);
 
   useEffect(() => {
-    if (selectedEventId) {
-      const ev = events.find((e) => e.id === selectedEventId);
-      setSelectedEvent(ev || null);
-      loadMenu();
-    }
+    const ev = events.find((e) => e.id === selectedEventId) || null;
+    setSelectedEvent(ev);
+  }, [selectedEventId, events]);
+
+  useEffect(() => {
+    if (!selectedEventId) { setCategories([]); setLoading(false); return; }
+    setLoading(true);
+    const unsub = onSnapshot(
+      query(collection(db, 'events', selectedEventId, 'categories'), orderBy('order')),
+      (snap) => {
+        const catDocs = snap.docs;
+        Promise.all(
+          catDocs.map((catDoc) =>
+            getDocs(query(collection(db, 'events', selectedEventId, 'categories', catDoc.id, 'items'), orderBy('order')))
+          )
+        ).then((itemsResults) => {
+          setCategories(catDocs.map((catDoc, i) => ({
+            id: catDoc.id,
+            ...(catDoc.data() as Omit<MenuCategory, 'id' | 'items'>),
+            items: itemsResults[i].docs.map((d) => ({ id: d.id, ...d.data() } as MenuItem)),
+          })));
+          setLoading(false);
+        });
+      }
+    );
+    return () => unsub();
   }, [selectedEventId]);
 
-  async function loadMenu() {
-    setLoading(true);
+  async function refreshItems() {
+    if (!selectedEventId) return;
     const catsSnap = await getDocs(query(collection(db, 'events', selectedEventId, 'categories'), orderBy('order')));
-    const cats: (MenuCategory & { items: MenuItem[] })[] = [];
-    for (const catDoc of catsSnap.docs) {
-      const itemsSnap = await getDocs(query(collection(db, 'events', selectedEventId, 'categories', catDoc.id, 'items'), orderBy('order')));
-      cats.push({ id: catDoc.id, ...(catDoc.data() as Omit<MenuCategory, 'id' | 'items'>), items: itemsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MenuItem)) });
-    }
-    setCategories(cats);
-    setLoading(false);
+    const catDocs = catsSnap.docs;
+    const itemsResults = await Promise.all(
+      catDocs.map((catDoc) =>
+        getDocs(query(collection(db, 'events', selectedEventId, 'categories', catDoc.id, 'items'), orderBy('order')))
+      )
+    );
+    setCategories(catDocs.map((catDoc, i) => ({
+      id: catDoc.id,
+      ...(catDoc.data() as Omit<MenuCategory, 'id' | 'items'>),
+      items: itemsResults[i].docs.map((d) => ({ id: d.id, ...d.data() } as MenuItem)),
+    })));
   }
 
   async function addCategory(e: React.FormEvent) {
@@ -277,13 +319,11 @@ function MenuTab() {
     if (!newCatName.trim() || !selectedEventId) return;
     await addDoc(collection(db, 'events', selectedEventId, 'categories'), { name: newCatName.trim(), order: categories.length });
     setNewCatName('');
-    loadMenu();
   }
 
   async function deleteCategory(catId: string) {
     if (!confirm('Categorie verwijderen?')) return;
     await deleteDoc(doc(db, 'events', selectedEventId, 'categories', catId));
-    loadMenu();
   }
 
   async function addItem(catId: string) {
@@ -297,27 +337,27 @@ function MenuTab() {
       order: cat.items.length,
     });
     setNewItems((prev) => ({ ...prev, [catId]: { name: '', slots: '', available: true } }));
-    loadMenu();
+    await refreshItems();
   }
 
   async function toggleItemAvailable(catId: string, item: MenuItem) {
     await updateDoc(doc(db, 'events', selectedEventId, 'categories', catId, 'items', item.id), { available: !item.available });
-    loadMenu();
+    await refreshItems();
   }
 
   async function deleteItem(catId: string, itemId: string) {
     await deleteDoc(doc(db, 'events', selectedEventId, 'categories', catId, 'items', itemId));
-    loadMenu();
+    await refreshItems();
   }
 
   async function updateItem(catId: string, item: MenuItem, name: string, slots: string) {
     await updateDoc(doc(db, 'events', selectedEventId, 'categories', catId, 'items', item.id), { name: name.trim(), slots: parseInt(slots) || 1 });
-    loadMenu();
+    await refreshItems();
   }
 
   async function updateItemOptionGroups(catId: string, item: MenuItem, optionGroups: OptionGroup[]) {
     await updateDoc(doc(db, 'events', selectedEventId, 'categories', catId, 'items', item.id), { optionGroups });
-    loadMenu();
+    await refreshItems();
   }
 
   return (
@@ -559,7 +599,7 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
   );
 }
 
-/* ── Tafels Tab ── */
+/* -- Tafels Tab -- */
 function TafelsTab() {
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEventId, setSelectedEventId] = useState('');
@@ -578,25 +618,24 @@ function TafelsTab() {
     });
   }, []);
 
-  useEffect(() => { if (selectedEventId) loadTables(); }, [selectedEventId]);
-
-  async function loadTables() {
-    const snap = await getDocs(collection(db, 'events', selectedEventId, 'tables'));
-    setTables(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Table)));
-  }
+  useEffect(() => {
+    if (!selectedEventId) { setTables([]); return; }
+    const unsub = onSnapshot(collection(db, 'events', selectedEventId, 'tables'), (snap) => {
+      setTables(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Table)));
+    });
+    return () => unsub();
+  }, [selectedEventId]);
 
   async function addTable(e: React.FormEvent) {
     e.preventDefault();
     if (!newTableName.trim() || !selectedEventId) return;
     await addDoc(collection(db, 'events', selectedEventId, 'tables'), { name: newTableName.trim() });
     setNewTableName('');
-    loadTables();
   }
 
   async function deleteTable(tableId: string) {
     if (!confirm('Tafel verwijderen?')) return;
     await deleteDoc(doc(db, 'events', selectedEventId, 'tables', tableId));
-    loadTables();
   }
 
   function downloadSingleQR(table: Table) {
@@ -631,6 +670,21 @@ function TafelsTab() {
     }
   }
 
+  function printQRCodes() {
+    const printContainer = document.getElementById('qr-print-root');
+    if (!printContainer) return;
+    const style = document.createElement('style');
+    style.innerHTML = '@page{size:A5;margin:10mm;}@media print{body>*{display:none!important;}#qr-print-root{display:block!important;}.qr-print-page{page-break-after:always;display:flex!important;flex-direction:column;align-items:center;justify-content:center;min-height:128mm;padding:20px;text-align:center;}.qr-print-page:last-child{page-break-after:auto;}}';
+    document.head.appendChild(style);
+    printContainer.style.display = 'block';
+    window.print();
+    printContainer.style.display = 'none';
+    document.head.removeChild(style);
+  }
+
+  const selectedEvent = events.find((e) => e.id === selectedEventId);
+  const qrLabel = selectedEvent?.qrLabel || 'Scan om te bestellen';
+
   return (
     <div className="space-y-6">
       <div className={card}>
@@ -652,12 +706,16 @@ function TafelsTab() {
           </div>
 
           {tables.length > 0 && (
-            <button onClick={downloadAllQRCodes} disabled={downloading} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm flex items-center gap-2">
-              {downloading ? '⏳ Bezig...' : '⬇️ Alle QR codes downloaden (ZIP)'}
-            </button>
+            <div className="flex gap-3 flex-wrap">
+              <button onClick={downloadAllQRCodes} disabled={downloading} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm flex items-center gap-2">
+                {downloading ? '⏳ Bezig...' : '⬇️ Alle QR codes downloaden (ZIP)'}
+              </button>
+              <button onClick={printQRCodes} className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm flex items-center gap-2">
+                🖨️ Afdrukken
+              </button>
+            </div>
           )}
 
-          {/* Hidden canvases for download */}
           <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
             {tables.map((table) => (
               <QRCodeCanvas key={table.id} id={`qr-canvas-${table.id}`} value={`${origin}/tafel/${table.id}`} size={400} />
@@ -669,7 +727,7 @@ function TafelsTab() {
               const url = `${origin}/tafel/${table.id}`;
               return (
                 <div key={table.id} className="bg-gray-800 border border-gray-700 rounded-xl p-4 text-center">
-                  <h3 className="font-bold text-xl text-white mb-3">Tafel {table.name}</h3>
+                  <h3 className="font-bold text-xl text-white mb-3">{table.name}</h3>
                   <div className="flex justify-center mb-3 bg-white p-3 rounded-lg inline-block mx-auto">
                     <QRCodeSVG value={url} size={160} />
                   </div>
@@ -687,13 +745,23 @@ function TafelsTab() {
             })}
             {tables.length === 0 && <p className="text-gray-500 text-center py-8 col-span-3">Nog geen tafels toegevoegd.</p>}
           </div>
+
+          <div id="qr-print-root" style={{ display: 'none' }}>
+            {tables.map((table, i) => (
+              <div key={table.id} className="qr-print-page" style={{ pageBreakAfter: i < tables.length - 1 ? 'always' : 'auto' }}>
+                <QRCodeSVG value={`${origin}/tafel/${table.id}`} size={300} />
+                <p style={{ marginTop: '16px', fontSize: '22px', fontWeight: 'bold', fontFamily: 'sans-serif', color: '#111' }}>{qrLabel}</p>
+                <p style={{ marginTop: '8px', fontSize: '18px', color: '#555', fontFamily: 'sans-serif' }}>{table.name}</p>
+              </div>
+            ))}
+          </div>
         </>
       )}
     </div>
   );
 }
 
-/* ── Bestellingen Tab ── */
+/* -- Bestellingen Tab -- */
 function BestellingenTab() {
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEventId, setSelectedEventId] = useState('');
@@ -702,6 +770,10 @@ function BestellingenTab() {
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'alle' | 'besteld' | 'klaar'>('alle');
   const [nameFilter, setNameFilter] = useState('');
+  const [tableFilter, setTableFilter] = useState('');
+  const [editOrder, setEditOrder] = useState<Order | null>(null);
+  const [editNote, setEditNote] = useState('');
+  const [editStatus, setEditStatus] = useState<'besteld' | 'klaar'>('besteld');
 
   useEffect(() => {
     getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
@@ -713,28 +785,66 @@ function BestellingenTab() {
   }, []);
 
   useEffect(() => {
-    if (selectedEventId) {
-      const ev = events.find((e) => e.id === selectedEventId);
-      setSelectedEvent(ev || null);
-      loadOrders();
-    }
+    const ev = events.find((e) => e.id === selectedEventId) || null;
+    setSelectedEvent(ev);
+  }, [selectedEventId, events]);
+
+  useEffect(() => {
+    if (!selectedEventId) { setOrders([]); return; }
+    setLoading(true);
+    const unsub = onSnapshot(
+      query(collection(db, 'events', selectedEventId, 'orders'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order)));
+        setLoading(false);
+      }
+    );
+    return () => unsub();
   }, [selectedEventId]);
 
-  async function loadOrders() {
-    setLoading(true);
-    const snap = await getDocs(query(collection(db, 'events', selectedEventId, 'orders'), orderBy('createdAt', 'desc')));
-    setOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order)));
-    setLoading(false);
+  async function deleteOrder(orderId: string) {
+    if (!confirm('Bestelling verwijderen?')) return;
+    await deleteDoc(doc(db, 'events', selectedEventId, 'orders', orderId));
   }
 
-  function fmt(t: any): string {
-    if (!t) return '';
-    try { return (t instanceof Timestamp ? t.toDate() : new Date(t)).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }); }
-    catch { return ''; }
+  function openEditOrder(order: Order) {
+    setEditOrder(order);
+    setEditNote(order.note || '');
+    setEditStatus(order.status);
   }
+
+  async function saveEditOrder() {
+    if (!editOrder) return;
+    await updateDoc(doc(db, 'events', selectedEventId, 'orders', editOrder.id), {
+      note: editNote,
+      status: editStatus,
+    });
+    setEditOrder(null);
+  }
+
+  async function exportOrdersExcel() {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const data = orders.map((o) => ({
+      'Tafel': o.tableName,
+      'Naam': o.customerName || '',
+      'Status': o.status,
+      'Tijdstip': fmt(o.createdAt),
+      'Items': o.items.map((i) => `${i.quantity}× ${i.name}`).join(', '),
+      'Drankkaarten': o.drankkaarten || 0,
+      'Opmerking': o.note || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Bestellingen');
+    const filename = `bestellingen-${selectedEvent?.name || 'export'}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  }
+
+  const tableNames = [...new Set(orders.map((o) => o.tableName).filter(Boolean))].sort();
 
   const filtered = orders.filter((o) => {
     if (filter !== 'alle' && o.status !== filter) return false;
+    if (tableFilter && o.tableName !== tableFilter) return false;
     const search = nameFilter.trim().toLowerCase();
     if (search) {
       const inName = o.customerName?.toLowerCase().includes(search) ?? false;
@@ -746,6 +856,58 @@ function BestellingenTab() {
 
   return (
     <div className="space-y-6">
+      {editOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setEditOrder(null)} />
+          <div className="relative bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h2 className="text-lg font-bold text-white">✏️ Bestelling bewerken</h2>
+            <div>
+              <p className="text-gray-400 text-sm font-semibold mb-2">Items (alleen lezen)</p>
+              <div className="space-y-1 bg-gray-700/50 rounded-lg p-3">
+                {editOrder.items.map((item, i) => (
+                  <p key={i} className="text-gray-300 text-sm">{item.quantity}× {item.name}</p>
+                ))}
+                {editOrder.drankkaarten > 0 && (
+                  <p className="text-yellow-400 text-sm">🎟️ {editOrder.drankkaarten} drankkaart{editOrder.drankkaarten !== 1 ? 'en' : ''}</p>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs mb-1 block">Status</label>
+              <div className="flex gap-2">
+                {(['besteld', 'klaar'] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setEditStatus(s)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${editStatus === s ? (s === 'besteld' ? 'bg-red-500/30 text-red-400 border border-red-500/50' : 'bg-green-500/30 text-green-400 border border-green-500/50') : 'bg-gray-700 text-gray-400 border border-gray-600'}`}
+                  >
+                    {s === 'besteld' ? 'Besteld' : 'Klaar'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs mb-1 block">Opmerking</label>
+              <textarea
+                value={editNote}
+                onChange={(e) => setEditNote(e.target.value)}
+                className={inp + ' w-full resize-none'}
+                rows={3}
+                placeholder="Opmerking..."
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setEditOrder(null)} className="flex-1 py-2 rounded-lg border border-gray-600 text-gray-400 hover:bg-gray-700 text-sm font-semibold transition-colors">
+                Annuleren
+              </button>
+              <button onClick={saveEditOrder} className="flex-1 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors">
+                Opslaan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className={card}>
         <label className="block text-sm font-semibold text-gray-300 mb-2">Evenement</label>
         <div className="flex flex-wrap gap-3 items-end">
@@ -753,13 +915,16 @@ function BestellingenTab() {
             <option value="">Selecteer evenement...</option>
             {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}{ev.active ? ' (Actief)' : ''}</option>)}
           </select>
-          {selectedEventId && <button onClick={loadOrders} className="bg-gray-700 hover:bg-gray-600 text-gray-300 py-2 px-4 rounded-lg text-sm transition-colors">↻ Vernieuwen</button>}
+          {selectedEventId && orders.length > 0 && (
+            <button onClick={exportOrdersExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-4 rounded-lg text-sm transition-colors font-semibold">
+              📥 Exporteer Excel
+            </button>
+          )}
         </div>
       </div>
 
       {selectedEventId && (
         <>
-          {/* Filters */}
           <div className="flex flex-wrap gap-3 items-center">
             <div className="flex gap-2">
               {(['alle', 'besteld', 'klaar'] as const).map((f) => (
@@ -771,9 +936,17 @@ function BestellingenTab() {
             <input
               value={nameFilter}
               onChange={(e) => setNameFilter(e.target.value)}
-              placeholder="🔍 Zoek op naam of tafel..."
-              className={inp + ' flex-1 min-w-[200px]'}
+              placeholder="🔍 Zoek op naam..."
+              className={inp + ' flex-1 min-w-[160px]'}
             />
+            <select
+              value={tableFilter}
+              onChange={(e) => setTableFilter(e.target.value)}
+              className={inp}
+            >
+              <option value="">Alle tafels</option>
+              {tableNames.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
 
           {loading ? <Spinner /> : (
@@ -786,9 +959,13 @@ function BestellingenTab() {
                       {order.customerName && <p className="text-gray-300 text-sm font-medium">👤 {order.customerName}</p>}
                       <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
                     </div>
-                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${order.status === 'besteld' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
-                      {order.status === 'besteld' ? 'Besteld' : 'Klaar'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-bold px-3 py-1 rounded-full ${order.status === 'besteld' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
+                        {order.status === 'besteld' ? 'Besteld' : 'Klaar'}
+                      </span>
+                      <button onClick={() => openEditOrder(order)} className="text-blue-400 hover:text-blue-300 text-sm px-2 py-1 rounded hover:bg-blue-500/10 transition-colors" title="Bewerken">✏️</button>
+                      <button onClick={() => deleteOrder(order.id)} className="text-red-400 hover:text-red-300 text-sm px-2 py-1 rounded hover:bg-red-500/10 transition-colors" title="Verwijderen">🗑️</button>
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     {order.items.map((item, i) => (
@@ -798,7 +975,7 @@ function BestellingenTab() {
                       </div>
                     ))}
                     {order.drankkaarten > 0 && (
-                      <p className="text-yellow-400 text-sm">🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}</p>
+                      <p className="text-yellow-400 text-sm">🎟️ {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}</p>
                     )}
                     {order.note && <p className="text-gray-500 text-sm mt-1 bg-gray-700/50 rounded px-2 py-1">💬 {order.note}</p>}
                   </div>
@@ -830,7 +1007,7 @@ function Spinner() {
   );
 }
 
-/* ── Instellingen Tab ── */
+/* -- Instellingen Tab -- */
 function InstellingenTab() {
   const [barPw, setBarPw] = useState('');
   const [adminPw, setAdminPw] = useState('');
@@ -850,7 +1027,6 @@ function InstellingenTab() {
     }
     setSaving(true);
     try {
-      // Read current passwords from Firestore to keep the ones not being changed
       const { doc: firestoreDoc, getDoc: firestoreGetDoc } = await import('firebase/firestore');
       const { db: firestoreDb } = await import('@/lib/firebase');
       const snap = await firestoreGetDoc(firestoreDoc(firestoreDb, 'settings', 'passwords'));
@@ -898,7 +1074,7 @@ function InstellingenTab() {
   );
 }
 
-/* ── Statistieken Tab ── */
+/* -- Statistieken Tab -- */
 function StatistiekenTab() {
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEventId, setSelectedEventId] = useState('');
@@ -916,18 +1092,53 @@ function StatistiekenTab() {
   }, []);
 
   useEffect(() => {
-    if (selectedEventId) {
-      const ev = events.find((e) => e.id === selectedEventId);
-      setSelectedEvent(ev || null);
-      loadOrders();
-    }
+    const ev = events.find((e) => e.id === selectedEventId) || null;
+    setSelectedEvent(ev);
+  }, [selectedEventId, events]);
+
+  useEffect(() => {
+    if (!selectedEventId) { setOrders([]); return; }
+    setLoading(true);
+    const unsub = onSnapshot(
+      query(collection(db, 'events', selectedEventId, 'orders'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order)));
+        setLoading(false);
+      }
+    );
+    return () => unsub();
   }, [selectedEventId]);
 
-  async function loadOrders() {
-    setLoading(true);
-    const snap = await getDocs(query(collection(db, 'events', selectedEventId, 'orders'), orderBy('createdAt', 'desc')));
-    setOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order)));
-    setLoading(false);
+  async function exportExcel() {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const statsData: Record<string, string | number>[] = summaryItems.map((item) => ({
+      'Item naam': item.name,
+      'Aantal': item.qty,
+      'Vakjes totaal': item.vakjes,
+      'Waarde (EUR)': pricePerSlot > 0 ? Number((item.vakjes * pricePerSlot).toFixed(2)) : '',
+    }));
+    statsData.push({
+      'Item naam': 'TOTAAL',
+      'Aantal': totalQty,
+      'Vakjes totaal': totalVakjes,
+      'Waarde (EUR)': pricePerSlot > 0 ? Number(totalWaarde.toFixed(2)) : '',
+    });
+    const ws1 = XLSX.utils.json_to_sheet(statsData);
+    XLSX.utils.book_append_sheet(wb, ws1, 'Statistieken');
+    const ordersData = orders.map((o) => ({
+      'Tafel': o.tableName,
+      'Naam': o.customerName || '',
+      'Status': o.status,
+      'Tijdstip': fmt(o.createdAt),
+      'Items': o.items.map((i) => `${i.quantity}× ${i.name}`).join(', '),
+      'Drankkaarten': o.drankkaarten || 0,
+      'Opmerking': o.note || '',
+    }));
+    const ws2 = XLSX.utils.json_to_sheet(ordersData);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Bestellingen');
+    const filename = `statistieken-${selectedEvent?.name || 'export'}.xlsx`;
+    XLSX.writeFile(wb, filename);
   }
 
   const pricePerSlot = selectedEvent?.pricePerSlot || 0;
@@ -955,8 +1166,8 @@ function StatistiekenTab() {
             {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}{ev.active ? ' (Actief)' : ''}</option>)}
           </select>
           {selectedEventId && (
-            <button onClick={loadOrders} className="bg-gray-700 hover:bg-gray-600 text-gray-300 py-2 px-4 rounded-lg text-sm transition-colors">
-              ↻ Vernieuwen
+            <button onClick={exportExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-4 rounded-lg text-sm transition-colors font-semibold">
+              📥 Exporteer Excel
             </button>
           )}
         </div>
@@ -1010,6 +1221,184 @@ function StatistiekenTab() {
           ) : (
             <p className="text-gray-500 text-center py-8">Geen bestellingen gevonden.</p>
           )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* -- Schermen Tab -- */
+function SchermenTab() {
+  const [events, setEvents] = useState<Event[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState('');
+  const [screens, setScreens] = useState<BarScreen[]>([]);
+  const [categories, setCategories] = useState<(MenuCategory & { items: MenuItem[] })[]>([]);
+  const [origin, setOrigin] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newCategoryIds, setNewCategoryIds] = useState<string[]>([]);
+  const [newItemIds, setNewItemIds] = useState<string[]>([]);
+  const [catLoading, setCatLoading] = useState(false);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
+      const evs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event));
+      setEvents(evs);
+      const active = evs.find((e) => e.active);
+      if (active) setSelectedEventId(active.id);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selectedEventId) { setScreens([]); return; }
+    const unsub = onSnapshot(collection(db, 'events', selectedEventId, 'screens'), (snap) => {
+      setScreens(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
+    });
+    return () => unsub();
+  }, [selectedEventId]);
+
+  useEffect(() => {
+    if (!selectedEventId) { setCategories([]); return; }
+    setCatLoading(true);
+    const unsub = onSnapshot(
+      query(collection(db, 'events', selectedEventId, 'categories'), orderBy('order')),
+      (snap) => {
+        const catDocs = snap.docs;
+        Promise.all(
+          catDocs.map((catDoc) =>
+            getDocs(query(collection(db, 'events', selectedEventId, 'categories', catDoc.id, 'items'), orderBy('order')))
+          )
+        ).then((itemsResults) => {
+          setCategories(catDocs.map((catDoc, i) => ({
+            id: catDoc.id,
+            ...(catDoc.data() as Omit<MenuCategory, 'id' | 'items'>),
+            items: itemsResults[i].docs.map((d) => ({ id: d.id, ...d.data() } as MenuItem)),
+          })));
+          setCatLoading(false);
+        });
+      }
+    );
+    return () => unsub();
+  }, [selectedEventId]);
+
+  async function createScreen(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newName.trim() || !selectedEventId) return;
+    await addDoc(collection(db, 'events', selectedEventId, 'screens'), {
+      name: newName.trim(),
+      categoryIds: newCategoryIds,
+      itemIds: newItemIds,
+    });
+    setNewName('');
+    setNewCategoryIds([]);
+    setNewItemIds([]);
+  }
+
+  async function deleteScreen(screenId: string) {
+    if (!confirm('Scherm verwijderen?')) return;
+    await deleteDoc(doc(db, 'events', selectedEventId, 'screens', screenId));
+  }
+
+  function toggleCategory(catId: string) {
+    setNewCategoryIds((prev) => prev.includes(catId) ? prev.filter((id) => id !== catId) : [...prev, catId]);
+    setNewItemIds((prev) => {
+      const cat = categories.find((c) => c.id === catId);
+      if (!cat) return prev;
+      const catItemIds = cat.items.map((i) => i.id);
+      return prev.filter((id) => !catItemIds.includes(id));
+    });
+  }
+
+  function toggleItem(itemId: string) {
+    setNewItemIds((prev) => prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]);
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className={card}>
+        <label className="block text-sm font-semibold text-gray-300 mb-2">Evenement</label>
+        <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)} className={inp + ' w-full max-w-xs'}>
+          <option value="">Selecteer evenement...</option>
+          {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}{ev.active ? ' (Actief)' : ''}</option>)}
+        </select>
+      </div>
+
+      {selectedEventId && (
+        <>
+          <div className={card}>
+            <h2 className="text-base font-bold mb-4 text-white">Nieuw scherm aanmaken</h2>
+            <form onSubmit={createScreen} className="space-y-4">
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Schemanaam (bv. Cocktails scherm)" className={inp + ' w-full'} />
+              {catLoading ? <Spinner /> : (
+                <div className="space-y-3">
+                  <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider">Categorieën &amp; items</p>
+                  {categories.map((cat) => (
+                    <div key={cat.id} className="bg-gray-700/50 rounded-lg p-3 space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={newCategoryIds.includes(cat.id)} onChange={() => toggleCategory(cat.id)} className="rounded" />
+                        <span className="font-semibold text-white">{cat.name}</span>
+                        <span className="text-gray-400 text-xs">(alle items)</span>
+                      </label>
+                      {!newCategoryIds.includes(cat.id) && (
+                        <div className="ml-6 space-y-1">
+                          {cat.items.map((item) => (
+                            <label key={item.id} className="flex items-center gap-2 cursor-pointer">
+                              <input type="checkbox" checked={newItemIds.includes(item.id)} onChange={() => toggleItem(item.id)} className="rounded" />
+                              <span className="text-gray-300 text-sm">{item.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {categories.length === 0 && <p className="text-gray-500 text-sm">Geen categorieën gevonden voor dit evenement.</p>}
+                </div>
+              )}
+              <button type="submit" disabled={!newName.trim()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm">
+                + Scherm aanmaken
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="font-bold text-white text-base">Bestaande schermen</h3>
+            {screens.length === 0 ? (
+              <p className="text-gray-500 text-center py-8">Nog geen schermen aangemaakt.</p>
+            ) : (
+              screens.map((screen) => (
+                <div key={screen.id} className={card}>
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="min-w-0">
+                      <p className="font-bold text-white">{screen.name}</p>
+                      <p className="text-gray-400 text-xs font-mono mt-1 break-all">{origin}/bar/scherm/{screen.id}</p>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {screen.categoryIds.map((catId) => {
+                          const cat = categories.find((c) => c.id === catId);
+                          return cat ? (
+                            <span key={catId} className="bg-green-500/20 text-green-400 border border-green-500/30 text-xs px-2 py-0.5 rounded-full">{cat.name}</span>
+                          ) : null;
+                        })}
+                        {screen.itemIds.map((itemId) => {
+                          const item = categories.flatMap((c) => c.items).find((i) => i.id === itemId);
+                          return item ? (
+                            <span key={itemId} className="bg-blue-500/20 text-blue-400 border border-blue-500/30 text-xs px-2 py-0.5 rounded-full">{item.name}</span>
+                          ) : null;
+                        })}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <a href={`${origin}/bar/scherm/${screen.id}`} target="_blank" rel="noopener noreferrer" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-1.5 px-3 rounded-lg text-sm transition-colors">
+                        Openen →
+                      </a>
+                      <button onClick={() => deleteScreen(screen.id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-semibold py-1.5 px-3 rounded-lg text-sm transition-colors">
+                        Verwijderen
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </>
       )}
     </div>

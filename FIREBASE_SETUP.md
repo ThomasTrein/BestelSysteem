@@ -34,6 +34,12 @@ Ga naar **Firestore → Regels** en vervang de bestaande regels door:
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Settings (wachtwoorden, schermen config)
+    match /settings/{document} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
     // Events en submenu zijn leesbaar voor iedereen (klanten moeten menu zien)
     match /events/{eventId} {
       allow read: if true;
@@ -55,6 +61,11 @@ service cloud.firestore {
       }
       
       match /orders/{orderId} {
+        allow read: if true;
+        allow write: if true;
+      }
+      
+      match /screens/{screenId} {
         allow read: if true;
         allow write: if true;
       }

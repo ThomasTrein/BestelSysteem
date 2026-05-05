@@ -42,26 +42,18 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 Hier zijn een aantal ideeën die de app verder kunnen verbeteren:
 
 ### Barscherm & Bestellingen
-- **Geluidssignaal bij nieuwe bestelling** — Een subtiel geluid wanneer een nieuwe bestelling binnenkomt, zodat barmedewerkers niets missen.
-- **Geschatte bereidingstijd** — Stel per item in hoe lang het duurt. Toon een timer op het barscherm.
 - **Bestelling weigeren / aanpassen** — Mogelijkheid om een bestelling te weigeren of aan te passen vanuit het barscherm (bv. bij uitverkoop).
-- **Notificatie op het bestelscherm** — De klant ziet wanneer zijn bestelling klaar is via real-time status update.
+- **Barmedewerker login met naam** — Elke barmedewerker logt in met naam zodat je kan zien wie welke bestelling afgehandeld heeft.
+- **Automatisch archiveren** — Bestellingen die meer dan X uur geleden klaar zijn automatisch archiveren.
 
 ### Menu & Evenementen
-- **Uitverkocht markeren** — Snel een item als uitverkocht markeren vanuit het barscherm zonder de admin te openen.
 - **Menu kopiëren van evenement** — Bij aanmaken van een nieuw evenement het menu van een vorig evenement overnemen.
-- **Foto's bij menu-items** — Voeg een afbeelding toe aan een item zodat klanten weten wat ze bestellen.
-- **Maximumstock per item** — Stel een maximumaantal in; automatisch onbeschikbaar bij uitverkoop.
+- **Melding als menu uitverkocht is** — Laat de admin weten als een item al veel besteld is (bv. > X keer).
+- **Meerdere actieve evenementen** — Ondersteuning voor het gelijktijdig actief hebben van meerdere evenementen (bv. binnenbar + buitenbar).
 
 ### Admin & Statistieken
-- **Export naar Excel/CSV** — Statistieken exporteren als spreadsheet voor na het evenement.
 - **Historiek per tafel** — Bekijk alle bestellingen van een specifieke tafel.
 - **Live dashboard** — Een apart scherm met live statistieken (omzet, meest verkochte item) voor op een TV.
-
-### Drankkaarten
-- **Drankkaart saldo bijhouden** — Registreer hoeveel drankkaarten een klant heeft en hou bij hoeveel er al gebruikt zijn.
-- **Drankkaart koppelen aan naam** — Koppel drankkaarten aan een naam zodat je weet wie er nog saldo heeft.
-
-### Algemeen
-- **PWA (installeerbare app)** — Maak de website installeerbaar als app op mobiele toestellen.
-- **Donker thema voor bestelscherm** — Optioneel donker thema voor klanten die 's avonds bestellen.
+- **Bestelling geschiedenis per klant** — Toon alle bestellingen van dezelfde naam door het evenement heen.
+- **Voorkeursinstellingen per evenement opslaan** — Sla de kolom-instelling op het barscherm op per evenement in Firestore zodat het op elk apparaat hetzelfde is.
+- **Tijdslot statistieken** — Zie op welk uur de meeste bestellingen geplaatst worden (handig voor planning).

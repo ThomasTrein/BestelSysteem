@@ -70,4 +70,13 @@ export interface Event {
   showPrices: boolean;
   pricePerSlot: number;
   accentColor: string;
+  drankkaartSlots: number; // default 20
+  qrLabel?: string; // label printed under QR codes
+}
+
+export interface BarScreen {
+  id: string;
+  name: string;
+  categoryIds: string[]; // show all items from these categories
+  itemIds: string[];     // show only specific items (by itemId) — empty = show full category
 }

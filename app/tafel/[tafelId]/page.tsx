@@ -61,6 +61,37 @@ export default function TafelPage() {
   const [modalError, setModalError] = useState('');
 
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('ksa_customer_theme');
+    if (saved === 'dark') setIsDark(true);
+    const savedCart = localStorage.getItem(`ksa_cart_${tafelId}`);
+    if (savedCart) {
+      try {
+        const cart = JSON.parse(savedCart);
+        if (cart.customerName) setCustomerName(cart.customerName);
+        if (cart.nameDone) setNameDone(cart.nameDone);
+        if (cart.simpleQty) setSimpleQty(cart.simpleQty);
+        if (cart.optionEntries) setOptionEntries(cart.optionEntries);
+        if (cart.drankkaarten !== undefined) setDrankkaarten(cart.drankkaarten);
+        if (cart.note !== undefined) setNote(cart.note);
+      } catch {}
+    }
+  }, [tafelId]);
+
+  // Save cart to localStorage on every change
+  useEffect(() => {
+    if (!success) {
+      localStorage.setItem(`ksa_cart_${tafelId}`, JSON.stringify({ customerName, nameDone, simpleQty, optionEntries, drankkaarten, note }));
+    }
+  }, [customerName, nameDone, simpleQty, optionEntries, drankkaarten, note, success, tafelId]);
+
+  function toggleTheme() {
+    const newDark = !isDark;
+    setIsDark(newDark);
+    localStorage.setItem('ksa_customer_theme', newDark ? 'dark' : 'light');
+  }
 
   useEffect(() => { loadData(); }, [tafelId]);
 
@@ -217,6 +248,7 @@ export default function TafelPage() {
         createdAt: serverTimestamp(),
       });
       setSuccess(true);
+      localStorage.removeItem(`ksa_cart_${tafelId}`);
     } catch (err) {
       console.error(err);
       alert('Fout bij het plaatsen van de bestelling. Probeer opnieuw.');
@@ -233,26 +265,39 @@ export default function TafelPage() {
     setSuccess(false);
     setNameDone(false);
     setCustomerName('');
+    localStorage.removeItem(`ksa_cart_${tafelId}`);
   }
 
   const accent = event?.accentColor || '#16a34a';
   const totalSelected = Object.values(simpleQty).reduce((a, b) => a + b, 0) + optionEntries.length + drankkaarten;
+  const drankkaartSlots = event?.drankkaartSlots || 20;
+  const totalVakjes =
+    categories.flatMap((cat) => cat.items.map((item) => (simpleQty[item.id] || 0) * (item.slots || 0))).reduce((a, b) => a + b, 0) +
+    optionEntries.reduce((a, e) => a + (e.slots || 0), 0) +
+    drankkaarten * drankkaartSlots;
+  const totalPrice = totalVakjes * (event?.pricePerSlot || 0);
+
+  const bg = isDark ? 'bg-gray-900' : 'bg-gray-50';
+  const cardBg = isDark ? 'bg-gray-800' : 'bg-white';
+  const textMain = isDark ? 'text-gray-100' : 'text-gray-800';
+  const textSub = isDark ? 'text-gray-400' : 'text-gray-500';
+  const borderSub = isDark ? 'border-gray-700' : 'border-gray-200';
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className={`min-h-screen flex items-center justify-center ${bg}`}>
       <div className="text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4" style={{ borderColor: accent }}></div>
-        <p className="text-gray-600">Laden...</p>
+        <p className={textSub}>Laden...</p>
       </div>
     </div>
   );
 
   if (error) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+    <div className={`min-h-screen flex items-center justify-center ${bg} p-4`}>
       <div className="text-center max-w-sm">
         <div className="text-5xl mb-4">⚠️</div>
-        <h1 className="text-xl font-bold text-gray-800 mb-2">Oeps!</h1>
-        <p className="text-gray-600">{error}</p>
+        <h1 className={`text-xl font-bold ${textMain} mb-2`}>Oeps!</h1>
+        <p className={textSub}>{error}</p>
       </div>
     </div>
   );
@@ -271,21 +316,21 @@ export default function TafelPage() {
   );
 
   if (!nameDone) return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
+    <div className={`min-h-screen flex items-center justify-center p-4 ${bg}`}>
+      <div className={`${cardBg} rounded-2xl shadow-xl p-8 w-full max-w-sm`}>
         <div className="text-center mb-6">
           <div className="text-5xl mb-3">👋</div>
-          <h1 className="text-2xl font-bold text-gray-800">{event?.name}</h1>
-          <p className="text-gray-500 mt-1">Tafel {table?.name}</p>
+          <h1 className={`text-2xl font-bold ${textMain}`}>{event?.name}</h1>
+          <p className={textSub + ' mt-1'}>Tafel {table?.name}</p>
         </div>
-        <p className="text-gray-700 font-medium mb-4 text-center">Wat is je naam?</p>
+        <p className={`${isDark ? 'text-gray-300' : 'text-gray-700'} font-medium mb-4 text-center`}>Wat is je naam?</p>
         <form onSubmit={(e) => { e.preventDefault(); if (customerName.trim()) setNameDone(true); }} className="space-y-4">
           <input
             type="text"
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
             placeholder="Voer je naam in..."
-            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 text-lg focus:outline-none placeholder-gray-300"
+            className={`w-full border-2 ${isDark ? 'border-gray-600 bg-gray-700 text-gray-100 placeholder-gray-400' : 'border-gray-200 bg-white text-gray-800 placeholder-gray-300'} rounded-xl px-4 py-3 text-lg focus:outline-none`}
             autoFocus
             maxLength={50}
           />
@@ -303,22 +348,22 @@ export default function TafelPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen ${bg}`}>
       {modalItem && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/60" onClick={closeModal} />
-          <div className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[85vh] flex flex-col">
-            <div className="p-5 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-800">{modalItem.name}</h2>
-              <p className="text-gray-500 text-sm">Kies je opties</p>
+          <div className={`relative ${cardBg} rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[85vh] flex flex-col`}>
+            <div className={`p-5 border-b ${borderSub}`}>
+              <h2 className={`text-lg font-bold ${textMain}`}>{modalItem.name}</h2>
+              <p className={textSub + ' text-sm'}>Kies je opties</p>
             </div>
             <div className="overflow-y-auto flex-1 p-5 space-y-5">
               {(modalItem.optionGroups || []).map((group) => (
                 <div key={group.id}>
                   <div className="flex items-center gap-2 mb-2">
-                    <p className="font-semibold text-gray-800">{group.name}</p>
+                    <p className={`font-semibold ${textMain}`}>{group.name}</p>
                     {group.required && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Verplicht</span>}
-                    <span className="text-xs text-gray-400">{group.type === 'single' ? '(kies 1)' : '(meerdere)'}</span>
+                    <span className={`text-xs ${textSub}`}>{group.type === 'single' ? '(kies 1)' : '(meerdere)'}</span>
                   </div>
                   <div className="space-y-2">
                     {group.choices.map((choice) => {
@@ -326,8 +371,8 @@ export default function TafelPage() {
                       return (
                         <label
                           key={choice.id}
-                          className="flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors"
-                          style={isSelected ? { borderColor: accent, backgroundColor: accent + '10' } : { borderColor: '#e5e7eb' }}
+                          className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${isDark ? 'border-gray-600' : ''}`}
+                          style={isSelected ? { borderColor: accent, backgroundColor: accent + '20' } : undefined}
                         >
                           <input
                             type={group.type === 'single' ? 'radio' : 'checkbox'}
@@ -347,7 +392,7 @@ export default function TafelPage() {
                               />
                             )}
                           </div>
-                          <span className="text-gray-800 font-medium">{choice.name}</span>
+                          <span className={`${textMain} font-medium`}>{choice.name}</span>
                         </label>
                       );
                     })}
@@ -356,8 +401,8 @@ export default function TafelPage() {
               ))}
               {modalError && <p className="text-red-500 text-sm font-medium">{modalError}</p>}
             </div>
-            <div className="p-5 border-t border-gray-100 flex gap-3">
-              <button onClick={closeModal} className="flex-1 py-3 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors">
+            <div className={`p-5 border-t ${borderSub} flex gap-3`}>
+              <button onClick={closeModal} className={`flex-1 py-3 rounded-xl border-2 ${isDark ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'} font-semibold transition-colors`}>
                 Annuleren
               </button>
               <button onClick={confirmModal} className="flex-1 py-3 rounded-xl text-white font-bold transition-opacity hover:opacity-90" style={{ backgroundColor: accent }}>
@@ -371,12 +416,12 @@ export default function TafelPage() {
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowConfirm(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+          <div className={`relative ${cardBg} rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center`}>
             <div className="text-4xl mb-4">🛒</div>
-            <h2 className="text-xl font-bold text-gray-800 mb-2">Bestelling bevestigen</h2>
-            <p className="text-gray-600 mb-6">Heb je alles besteld wat je wil?</p>
+            <h2 className={`text-xl font-bold ${textMain} mb-2`}>Bestelling bevestigen</h2>
+            <p className={`${textSub} mb-6`}>Heb je alles besteld wat je wil?</p>
             <div className="flex gap-3">
-              <button onClick={() => setShowConfirm(false)} className="flex-1 py-3 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors">
+              <button onClick={() => setShowConfirm(false)} className={`flex-1 py-3 rounded-xl border-2 ${isDark ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'} font-semibold transition-colors`}>
                 Nog even kijken
               </button>
               <button
@@ -398,18 +443,27 @@ export default function TafelPage() {
             <h1 className="text-xl font-bold">🍺 {event?.name}</h1>
             <p className="text-white/70 text-sm">Tafel: {table?.name} · {customerName}</p>
           </div>
-          {totalSelected > 0 && (
-            <span className="bg-white/20 text-white font-bold rounded-full px-3 py-1 text-sm border border-white/30">
-              {totalSelected} item{totalSelected !== 1 ? 's' : ''}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {totalSelected > 0 && (
+              <span className="bg-white/20 text-white font-bold rounded-full px-3 py-1 text-sm border border-white/30">
+                {totalSelected} item{totalSelected !== 1 ? 's' : ''}
+              </span>
+            )}
+            <button
+              onClick={toggleTheme}
+              className="bg-white/20 hover:bg-white/30 text-white rounded-full w-9 h-9 flex items-center justify-center transition-colors"
+              aria-label="Toggle thema"
+            >
+              {isDark ? '☀️' : '🌙'}
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
         {categories.map((cat) => (
           <section key={cat.id}>
-            <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
+            <h2 className={`text-lg font-bold ${textMain} mb-3 pb-1 border-b-2`} style={{ borderColor: accent + '60' }}>
               {cat.name}
             </h2>
             <div className="space-y-3">
@@ -420,12 +474,12 @@ export default function TafelPage() {
                 const qty = getItemCount(item);
                 const itemEntries = optionEntries.filter((e) => e.itemId === item.id);
                 return (
-                  <div key={item.id} className="bg-white rounded-xl p-4 shadow-sm">
+                  <div key={item.id} className={`${cardBg} rounded-xl p-4 shadow-sm`}>
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex-1">
-                        <p className="font-semibold text-gray-800">{item.name}</p>
+                        <p className={`font-semibold ${textMain}`}>{item.name}</p>
                         <div className="flex items-center gap-3 mt-0.5">
-                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
                             {item.slots} vakje{item.slots !== 1 ? 's' : ''}
                           </span>
                           {event?.showPrices && (
@@ -433,24 +487,25 @@ export default function TafelPage() {
                               €{itemPrice.toFixed(2)}
                             </span>
                           )}
-                          {hasOptions && <span className="text-xs text-gray-400 italic">Keuze vereist</span>}
+                          {hasOptions && <span className={`text-xs ${textSub} italic`}>Keuze vereist</span>}
                         </div>
                       </div>
                       <QuantitySelector
                         value={qty}
                         onChange={(v) => handleQuantityChange(item, cat, v)}
                         accent={accent}
+                        isDark={isDark}
                       />
                     </div>
                     {hasOptions && itemEntries.length > 0 && (
-                      <div className="mt-3 space-y-1.5 border-t border-gray-100 pt-2">
+                      <div className={`mt-3 space-y-1.5 border-t ${borderSub} pt-2`}>
                         {itemEntries.map((entry, idx) => (
                           <div key={entry.uid} className="flex items-start justify-between gap-2 text-sm">
                             <div>
-                              <span className="text-gray-600 font-medium">#{idx + 1}</span>
+                              <span className={`${isDark ? 'text-gray-400' : 'text-gray-600'} font-medium`}>#{idx + 1}</span>
                               {entry.selectedOptions.filter((o) => o.selected.length > 0).map((opt) => (
-                                <span key={opt.groupId} className="text-gray-500 ml-2">
-                                  <span className="font-medium text-gray-600">{opt.groupName}:</span> {opt.selected.join(', ')}
+                                <span key={opt.groupId} className={`${textSub} ml-2`}>
+                                  <span className={`font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{opt.groupName}:</span> {opt.selected.join(', ')}
                                 </span>
                               ))}
                             </div>
@@ -472,30 +527,47 @@ export default function TafelPage() {
         ))}
 
         <section>
-          <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
+          <h2 className={`text-lg font-bold ${textMain} mb-3 pb-1 border-b-2`} style={{ borderColor: accent + '60' }}>
             Drankkaarten
           </h2>
-          <div className="bg-white rounded-xl p-4 shadow-sm flex items-center justify-between gap-4">
+          <div className={`${cardBg} rounded-xl p-4 shadow-sm flex items-center justify-between gap-4`}>
             <div className="flex-1">
-              <p className="font-semibold text-gray-800">🎫 Drankkaarten</p>
-              <p className="text-gray-500 text-sm">Heb je nog drankkaarten nodig?</p>
+              <p className={`font-semibold ${textMain}`}>🎟️ Drankkaarten</p>
+              <div className="flex items-center gap-3 mt-0.5">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
+                  {drankkaartSlots} vakje{drankkaartSlots !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <p className={`${textSub} text-sm mt-1`}>Heb je nog drankkaarten nodig?</p>
             </div>
-            <QuantitySelector value={drankkaarten} onChange={setDrankkaarten} accent={accent} />
+            <QuantitySelector value={drankkaarten} onChange={setDrankkaarten} accent={accent} isDark={isDark} />
           </div>
         </section>
 
         <section>
-          <h2 className="text-lg font-bold text-gray-800 mb-3 pb-1 border-b-2" style={{ borderColor: accent + '60' }}>
+          <h2 className={`text-lg font-bold ${textMain} mb-3 pb-1 border-b-2`} style={{ borderColor: accent + '60' }}>
             Opmerking
           </h2>
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="Eventuele opmerkingen (allergieën, speciale wensen...)"
-            className="w-full bg-white rounded-xl p-4 shadow-sm border border-gray-200 resize-none text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2"
+            className={`w-full ${cardBg} ${isDark ? 'text-gray-100 placeholder-gray-500 border-gray-700' : 'text-gray-800 placeholder-gray-400 border-gray-200'} rounded-xl p-4 shadow-sm border resize-none focus:outline-none focus:ring-2`}
             rows={3}
           />
         </section>
+
+        {totalVakjes > 0 && (
+          <div className={`sticky bottom-2 rounded-xl px-4 py-3 flex justify-between items-center shadow-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+            <div>
+              <p className={`font-bold text-lg ${textMain}`}>{totalVakjes} vakje{totalVakjes !== 1 ? 's' : ''}</p>
+              <p className={`text-sm ${textSub}`}>Totaal vakjes</p>
+            </div>
+            {event?.showPrices && (event?.pricePerSlot || 0) > 0 && (
+              <p className="font-bold text-lg" style={{ color: accent }}>€{totalPrice.toFixed(2)}</p>
+            )}
+          </div>
+        )}
 
         <button
           onClick={() => {
