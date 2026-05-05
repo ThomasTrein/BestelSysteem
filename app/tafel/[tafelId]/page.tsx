@@ -270,12 +270,12 @@ export default function TafelPage() {
 
   const accent = event?.accentColor || '#16a34a';
   const totalSelected = Object.values(simpleQty).reduce((a, b) => a + b, 0) + optionEntries.length + drankkaarten;
-  const drankkaartSlots = event?.drankkaartSlots || 20;
   const totalVakjes =
     categories.flatMap((cat) => cat.items.map((item) => (simpleQty[item.id] || 0) * (item.slots || 0))).reduce((a, b) => a + b, 0) +
-    optionEntries.reduce((a, e) => a + (e.slots || 0), 0) +
-    drankkaarten * drankkaartSlots;
+    optionEntries.reduce((a, e) => a + (e.slots || 0), 0);
   const totalPrice = totalVakjes * (event?.pricePerSlot || 0);
+  const drankkaartPrice = event?.drankkaartPrice || 0;
+  const totalDrankkaartPrice = drankkaarten * drankkaartPrice;
 
   const bg = isDark ? 'bg-gray-900' : 'bg-gray-50';
   const cardBg = isDark ? 'bg-gray-800' : 'bg-white';
@@ -534,9 +534,11 @@ export default function TafelPage() {
             <div className="flex-1">
               <p className={`font-semibold ${textMain}`}>🎟️ Drankkaarten</p>
               <div className="flex items-center gap-3 mt-0.5">
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
-                  {drankkaartSlots} vakje{drankkaartSlots !== 1 ? 's' : ''}
-                </span>
+                {drankkaartPrice > 0 && (
+                  <span className="text-sm font-medium" style={{ color: accent }}>
+                    €{drankkaartPrice.toFixed(2)} per drankkaart
+                  </span>
+                )}
               </div>
               <p className={`${textSub} text-sm mt-1`}>Heb je nog drankkaarten nodig?</p>
             </div>
@@ -557,15 +559,27 @@ export default function TafelPage() {
           />
         </section>
 
-        {totalVakjes > 0 && (
+        {(totalVakjes > 0 || totalDrankkaartPrice > 0) && (
           <div className={`sticky bottom-2 rounded-xl px-4 py-3 flex justify-between items-center shadow-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
             <div>
-              <p className={`font-bold text-lg ${textMain}`}>{totalVakjes} vakje{totalVakjes !== 1 ? 's' : ''}</p>
-              <p className={`text-sm ${textSub}`}>Totaal vakjes</p>
+              {totalVakjes > 0 && (
+                <>
+                  <p className={`font-bold text-lg ${textMain}`}>{totalVakjes} vakje{totalVakjes !== 1 ? 's' : ''}</p>
+                  <p className={`text-sm ${textSub}`}>Totaal vakjes</p>
+                </>
+              )}
+              {totalDrankkaartPrice > 0 && (
+                <p className={`text-sm ${textSub}`}>🎟️ {drankkaarten}× drankkaart = €{totalDrankkaartPrice.toFixed(2)}</p>
+              )}
             </div>
-            {event?.showPrices && (event?.pricePerSlot || 0) > 0 && (
-              <p className="font-bold text-lg" style={{ color: accent }}>€{totalPrice.toFixed(2)}</p>
-            )}
+            <div className="text-right">
+              {event?.showPrices && (event?.pricePerSlot || 0) > 0 && totalVakjes > 0 && (
+                <p className="font-bold text-lg" style={{ color: accent }}>€{totalPrice.toFixed(2)}</p>
+              )}
+              {totalDrankkaartPrice > 0 && (
+                <p className="font-bold" style={{ color: accent }}>+€{totalDrankkaartPrice.toFixed(2)}</p>
+              )}
+            </div>
           </div>
         )}
 

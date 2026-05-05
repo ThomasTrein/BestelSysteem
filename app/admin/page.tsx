@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
-import { Event, MenuCategory, MenuItem, Table, Order, OptionGroup, OptionChoice, BarScreen } from '@/lib/types';
+import { Event, MenuCategory, MenuItem, Table, Order, OrderItem, OptionGroup, OptionChoice, BarScreen, SelectedOption } from '@/lib/types';
 import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords } from '@/lib/auth';
 
 type Tab = 'evenementen' | 'menu' | 'tafels' | 'bestellingen' | 'instellingen' | 'statistieken' | 'schermen';
@@ -102,8 +102,12 @@ function EvenementenTab() {
   const [newEnd, setNewEnd] = useState('');
   const [newPricePerSlot, setNewPricePerSlot] = useState('');
   const [newAccent, setNewAccent] = useState('#16a34a');
-  const [newDrankkaartSlots, setNewDrankkaartSlots] = useState('20');
+  const [newDrankkaartSlots, setNewDrankkaartSlots] = useState('');
+  const [newDrankkaartPrice, setNewDrankkaartPrice] = useState('');
   const [newQrLabel, setNewQrLabel] = useState('Scan om te bestellen');
+  const [doCopyMenu, setDoCopyMenu] = useState(false);
+  const [copyFromEventId, setCopyFromEventId] = useState('');
+  const [copyingMenu, setCopyingMenu] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(query(collection(db, 'events'), orderBy('startDate', 'desc')), (snap) => {
@@ -115,7 +119,7 @@ function EvenementenTab() {
   async function createEvent(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim() || !newStart || !newEnd) return;
-    await addDoc(collection(db, 'events'), {
+    const newEventRef = await addDoc(collection(db, 'events'), {
       name: newName.trim(),
       startDate: newStart,
       endDate: newEnd,
@@ -123,10 +127,34 @@ function EvenementenTab() {
       showPrices: true,
       pricePerSlot: parseFloat(newPricePerSlot) || 0,
       accentColor: newAccent,
-      drankkaartSlots: parseInt(newDrankkaartSlots) || 20,
+      drankkaartPrice: parseFloat(newDrankkaartPrice) || 0,
       qrLabel: newQrLabel.trim() || 'Scan om te bestellen',
     });
-    setNewName(''); setNewStart(''); setNewEnd(''); setNewPricePerSlot(''); setNewAccent('#16a34a'); setNewDrankkaartSlots('20'); setNewQrLabel('Scan om te bestellen');
+    if (doCopyMenu && copyFromEventId) {
+      setCopyingMenu(true);
+      try {
+        const catsSnap = await getDocs(query(collection(db, 'events', copyFromEventId, 'categories'), orderBy('order')));
+        for (const catDoc of catsSnap.docs) {
+          const catData = catDoc.data();
+          const newCatRef = await addDoc(collection(db, 'events', newEventRef.id, 'categories'), { name: catData.name, order: catData.order ?? 0 });
+          const itemsSnap = await getDocs(query(collection(db, 'events', copyFromEventId, 'categories', catDoc.id, 'items'), orderBy('order')));
+          for (const itemDoc of itemsSnap.docs) {
+            const itemData = itemDoc.data();
+            await addDoc(collection(db, 'events', newEventRef.id, 'categories', newCatRef.id, 'items'), {
+              name: itemData.name,
+              slots: itemData.slots ?? 1,
+              available: itemData.available ?? true,
+              order: itemData.order ?? 0,
+              optionGroups: itemData.optionGroups || [],
+            });
+          }
+        }
+      } finally {
+        setCopyingMenu(false);
+      }
+    }
+    setNewName(''); setNewStart(''); setNewEnd(''); setNewPricePerSlot(''); setNewAccent('#16a34a'); setNewDrankkaartPrice(''); setNewQrLabel('Scan om te bestellen');
+    setDoCopyMenu(false); setCopyFromEventId('');
   }
 
   async function activateEvent(id: string) {
@@ -174,15 +202,32 @@ function EvenementenTab() {
             </div>
           </div>
           <div>
-            <label className="text-gray-400 text-xs mb-1 block">Vakjes per drankkaart</label>
-            <input type="number" min="1" value={newDrankkaartSlots} onChange={(e) => setNewDrankkaartSlots(e.target.value)} placeholder="20" className={inp + ' w-full'} />
+            <label className="text-gray-400 text-xs mb-1 block">Prijs per drankkaart (€)</label>
+            <input type="number" step="0.01" min="0" value={newDrankkaartPrice} onChange={(e) => setNewDrankkaartPrice(e.target.value)} placeholder="10.00" className={inp + ' w-full'} />
           </div>
           <div className="sm:col-span-2">
             <label className="text-gray-400 text-xs mb-1 block">QR code label (tekst onder QR bij afdrukken)</label>
             <input value={newQrLabel} onChange={(e) => setNewQrLabel(e.target.value)} placeholder="Scan om te bestellen" className={inp + ' w-full'} />
           </div>
-          <button type="submit" className="sm:col-span-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
-            Aanmaken
+          <div className="sm:col-span-2 border-t border-gray-700 pt-3 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer text-gray-300 text-sm">
+              <input type="checkbox" checked={doCopyMenu} onChange={(e) => { setDoCopyMenu(e.target.checked); if (!e.target.checked) setCopyFromEventId(''); }} className="rounded" />
+              Kopieer menu van bestaand evenement
+            </label>
+            {doCopyMenu && (
+              <div className="space-y-2">
+                <select value={copyFromEventId} onChange={(e) => setCopyFromEventId(e.target.value)} className={inp + ' w-full'}>
+                  <option value="">Selecteer brongebeurtenis...</option>
+                  {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}{ev.active ? ' (Actief)' : ''}</option>)}
+                </select>
+                {copyFromEventId && (
+                  <p className="text-green-400 text-xs">✓ Menu van &apos;{events.find((e) => e.id === copyFromEventId)?.name}&apos; wordt gekopiëerd na aanmaken</p>
+                )}
+              </div>
+            )}
+          </div>
+          <button type="submit" disabled={copyingMenu} className="sm:col-span-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+            {copyingMenu ? '⏳ Menu kopiëren...' : 'Aanmaken'}
           </button>
         </form>
       </div>
@@ -201,7 +246,7 @@ function EvenementenTab() {
                     </span>
                   </div>
                   <p className="text-gray-400 text-sm">{ev.startDate} → {ev.endDate}</p>
-                  <p className="text-gray-400 text-sm">€{(ev.pricePerSlot || 0).toFixed(2)} per vakje</p>
+                  <p className="text-gray-400 text-sm">€{(ev.pricePerSlot || 0).toFixed(2)} per vakje · €{(ev.drankkaartPrice || 0).toFixed(2)} per drankkaart</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 items-center">
@@ -234,8 +279,8 @@ function EvenementenTab() {
                 <input type="number" step="0.01" min="0" defaultValue={ev.pricePerSlot || 0} onBlur={(e) => updateEventField(ev, { pricePerSlot: parseFloat(e.target.value) || 0 })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs w-20 focus:outline-none" />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-gray-400 text-xs">Vakjes/drankkaart:</label>
-                <input type="number" min="1" defaultValue={ev.drankkaartSlots || 20} onBlur={(e) => updateEventField(ev, { drankkaartSlots: parseInt(e.target.value) || 20 })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs w-20 focus:outline-none" />
+                <label className="text-gray-400 text-xs">Prijs/drankkaart (€):</label>
+                <input type="number" step="0.01" min="0" defaultValue={ev.drankkaartPrice || 0} onBlur={(e) => updateEventField(ev, { drankkaartPrice: parseFloat(e.target.value) || 0 })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs w-20 focus:outline-none" />
               </div>
               <div className="flex items-center gap-2 w-full">
                 <label className="text-gray-400 text-xs shrink-0">QR label:</label>
@@ -671,15 +716,41 @@ function TafelsTab() {
   }
 
   function printQRCodes() {
-    const printContainer = document.getElementById('qr-print-root');
-    if (!printContainer) return;
-    const style = document.createElement('style');
-    style.innerHTML = '@page{size:A5;margin:10mm;}@media print{body>*{display:none!important;}#qr-print-root{display:block!important;}.qr-print-page{page-break-after:always;display:flex!important;flex-direction:column;align-items:center;justify-content:center;min-height:128mm;padding:20px;text-align:center;}.qr-print-page:last-child{page-break-after:auto;}}';
-    document.head.appendChild(style);
-    printContainer.style.display = 'block';
-    window.print();
-    printContainer.style.display = 'none';
-    document.head.removeChild(style);
+    const event = events.find((e) => e.id === selectedEventId);
+    const label = event?.qrLabel || 'Scan om te bestellen';
+    const win = window.open('', '_blank', 'width=800,height=600');
+    if (!win) return;
+    const pagesHtml = tables.map((table) => {
+      const url = `${origin}/tafel/${table.id}`;
+      // Use Google Chart API for QR in print window (no React needed)
+      const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
+      return `
+        <div class="page">
+          <img src="${qrSrc}" width="300" height="300" alt="QR ${table.name}" />
+          <p class="label">${label}</p>
+          <p class="table-name">${table.name}</p>
+        </div>`;
+    }).join('');
+    win.document.write(`<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>QR Codes</title>
+<style>
+  @page { size: A5; margin: 12mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; }
+  .page {
+    width: 100%; height: 190mm;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+  .label { margin-top: 18px; font-size: 22px; font-weight: bold; color: #111; }
+  .table-name { margin-top: 8px; font-size: 17px; color: #555; }
+</style>
+</head><body>${pagesHtml}<script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}<\/script></body></html>`);
+    win.document.close();
   }
 
   const selectedEvent = events.find((e) => e.id === selectedEventId);
@@ -746,15 +817,6 @@ function TafelsTab() {
             {tables.length === 0 && <p className="text-gray-500 text-center py-8 col-span-3">Nog geen tafels toegevoegd.</p>}
           </div>
 
-          <div id="qr-print-root" style={{ display: 'none' }}>
-            {tables.map((table, i) => (
-              <div key={table.id} className="qr-print-page" style={{ pageBreakAfter: i < tables.length - 1 ? 'always' : 'auto' }}>
-                <QRCodeSVG value={`${origin}/tafel/${table.id}`} size={300} />
-                <p style={{ marginTop: '16px', fontSize: '22px', fontWeight: 'bold', fontFamily: 'sans-serif', color: '#111' }}>{qrLabel}</p>
-                <p style={{ marginTop: '8px', fontSize: '18px', color: '#555', fontFamily: 'sans-serif' }}>{table.name}</p>
-              </div>
-            ))}
-          </div>
         </>
       )}
     </div>
@@ -774,6 +836,13 @@ function BestellingenTab() {
   const [editOrder, setEditOrder] = useState<Order | null>(null);
   const [editNote, setEditNote] = useState('');
   const [editStatus, setEditStatus] = useState<'besteld' | 'klaar'>('besteld');
+  const [editItems, setEditItems] = useState<OrderItem[]>([]);
+  const [editEventCategories, setEditEventCategories] = useState<(MenuCategory & { items: MenuItem[] })[]>([]);
+  const [loadingEditCats, setLoadingEditCats] = useState(false);
+  const [addItemSearch, setAddItemSearch] = useState('');
+  const [addItemSelected, setAddItemSelected] = useState<MenuItem | null>(null);
+  const [addItemCat, setAddItemCat] = useState<(MenuCategory & { items: MenuItem[] }) | null>(null);
+  const [addItemOptions, setAddItemOptions] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
@@ -811,15 +880,36 @@ function BestellingenTab() {
     setEditOrder(order);
     setEditNote(order.note || '');
     setEditStatus(order.status);
+    setEditItems([...order.items]);
+    setAddItemSearch('');
+    setAddItemSelected(null);
+    setAddItemOptions({});
+    setLoadingEditCats(true);
+    (async () => {
+      try {
+        const catsSnap = await getDocs(query(collection(db, 'events', selectedEventId, 'categories'), orderBy('order')));
+        const cats: (MenuCategory & { items: MenuItem[] })[] = [];
+        for (const catDoc of catsSnap.docs) {
+          const itemsSnap = await getDocs(query(collection(db, 'events', selectedEventId, 'categories', catDoc.id, 'items'), orderBy('order')));
+          cats.push({ id: catDoc.id, ...(catDoc.data() as Omit<MenuCategory, 'id' | 'items'>), items: itemsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MenuItem)) });
+        }
+        setEditEventCategories(cats);
+      } finally {
+        setLoadingEditCats(false);
+      }
+    })();
   }
 
   async function saveEditOrder() {
     if (!editOrder) return;
     await updateDoc(doc(db, 'events', selectedEventId, 'orders', editOrder.id), {
+      items: editItems,
       note: editNote,
       status: editStatus,
     });
     setEditOrder(null);
+    setEditItems([]);
+    setEditEventCategories([]);
   }
 
   async function exportOrdersExcel() {
@@ -859,18 +949,102 @@ function BestellingenTab() {
       {editOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setEditOrder(null)} />
-          <div className="relative bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className="relative bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-bold text-white">✏️ Bestelling bewerken</h2>
             <div>
-              <p className="text-gray-400 text-sm font-semibold mb-2">Items (alleen lezen)</p>
-              <div className="space-y-1 bg-gray-700/50 rounded-lg p-3">
-                {editOrder.items.map((item, i) => (
-                  <p key={i} className="text-gray-300 text-sm">{item.quantity}× {item.name}</p>
+              <p className="text-gray-400 text-sm font-semibold mb-2">Items</p>
+              <div className="space-y-2 bg-gray-700/50 rounded-lg p-3 max-h-48 overflow-y-auto">
+                {editItems.map((item, i) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-300 text-sm flex-1 min-w-0 truncate">{item.name}</span>
+                      <button onClick={() => setEditItems((prev) => { const n = [...prev]; const newQty = n[i].quantity - 1; if (newQty <= 0) return prev.filter((_, idx) => idx !== i); n[i] = { ...n[i], quantity: newQty }; return n; })} className="w-7 h-7 rounded-full bg-gray-600 hover:bg-gray-500 text-white font-bold text-sm flex items-center justify-center shrink-0">−</button>
+                      <span className="text-white font-bold w-6 text-center text-sm shrink-0">{item.quantity}</span>
+                      <button onClick={() => setEditItems((prev) => { const n = [...prev]; n[i] = { ...n[i], quantity: n[i].quantity + 1 }; return n; })} className="w-7 h-7 rounded-full bg-gray-600 hover:bg-gray-500 text-white font-bold text-sm flex items-center justify-center shrink-0">+</button>
+                      <button onClick={() => setEditItems((prev) => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-300 text-xs ml-1 shrink-0">✕</button>
+                    </div>
+                    {item.selectedOptions && item.selectedOptions.filter((o) => o.selected.length > 0).length > 0 && (
+                      <div className="ml-2 pl-2 border-l border-gray-600 text-xs text-gray-500 flex flex-wrap gap-x-3">
+                        {item.selectedOptions.filter((o) => o.selected.length > 0).map((o) => (
+                          <span key={o.groupId}><span className="text-gray-400">{o.groupName}:</span> {o.selected.join(', ')}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ))}
                 {editOrder.drankkaarten > 0 && (
                   <p className="text-yellow-400 text-sm">🎟️ {editOrder.drankkaarten} drankkaart{editOrder.drankkaarten !== 1 ? 'en' : ''}</p>
                 )}
+                {editItems.length === 0 && <p className="text-gray-500 text-sm">Geen items</p>}
               </div>
+            </div>
+            <div>
+              <p className="text-gray-400 text-sm font-semibold mb-2">Item toevoegen</p>
+              {loadingEditCats ? <p className="text-gray-500 text-sm">Laden...</p> : (
+                <div className="space-y-2">
+                  <input
+                    value={addItemSearch}
+                    onChange={(e) => { setAddItemSearch(e.target.value); setAddItemSelected(null); setAddItemOptions({}); }}
+                    placeholder="Zoek een item..."
+                    className={inp + ' w-full'}
+                  />
+                  {addItemSearch.trim() && !addItemSelected && (
+                    <div className="bg-gray-700 border border-gray-600 rounded-lg max-h-36 overflow-y-auto">
+                      {(() => {
+                        const results = editEventCategories.flatMap((cat) =>
+                          cat.items.filter((item) => item.name.toLowerCase().includes(addItemSearch.toLowerCase())).map((item) => ({ item, cat }))
+                        );
+                        return results.length > 0 ? results.map(({ item, cat }) => (
+                          <button key={item.id + cat.id} onClick={() => { setAddItemSelected(item); setAddItemCat(cat); setAddItemOptions({}); }} className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-600 flex justify-between items-center">
+                            <span>{item.name}</span><span className="text-gray-500 text-xs ml-2 shrink-0">{cat.name}</span>
+                          </button>
+                        )) : <p className="px-3 py-2 text-gray-500 text-sm">Geen items gevonden</p>;
+                      })()}
+                    </div>
+                  )}
+                  {addItemSelected && (
+                    <div className="bg-gray-700/50 rounded-lg p-3 space-y-2">
+                      <p className="text-white text-sm font-semibold">{addItemSelected.name}</p>
+                      {(addItemSelected.optionGroups || []).length > 0 && (
+                        <div className="space-y-2">
+                          {(addItemSelected.optionGroups || []).map((group) => (
+                            <div key={group.id}>
+                              <p className="text-gray-400 text-xs mb-1">{group.name}{group.required ? ' *' : ''}</p>
+                              <div className="flex flex-wrap gap-1">
+                                {group.choices.map((choice) => {
+                                  const isSel = (addItemOptions[group.id] || []).includes(choice.name);
+                                  return (
+                                    <button key={choice.id} onClick={() => setAddItemOptions((prev) => { const cur = prev[group.id] || []; if (group.type === 'single') return { ...prev, [group.id]: [choice.name] }; return { ...prev, [group.id]: cur.includes(choice.name) ? cur.filter((c) => c !== choice.name) : [...cur, choice.name] }; })} className={`text-xs px-2 py-1 rounded-full border transition-colors ${isSel ? 'bg-green-600 text-white border-green-500' : 'bg-gray-700 text-gray-300 border-gray-600 hover:border-gray-500'}`}>{choice.name}</button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => {
+                          if (!addItemSelected || !addItemCat) return;
+                          for (const group of (addItemSelected.optionGroups || [])) {
+                            if (group.required && (!addItemOptions[group.id] || addItemOptions[group.id].length === 0)) return;
+                          }
+                          const selectedOptions: SelectedOption[] = (addItemSelected.optionGroups || [])
+                            .map((group) => ({ groupId: group.id, groupName: group.name, type: group.type, selected: addItemOptions[group.id] || [] }))
+                            .filter((o) => o.selected.length > 0);
+                          const newOrderItem: OrderItem = { itemId: addItemSelected.id, name: addItemSelected.name, quantity: 1, slots: addItemSelected.slots, price: addItemSelected.slots * (selectedEvent?.pricePerSlot || 0), categoryName: addItemCat.name, ...(selectedOptions.length > 0 ? { selectedOptions } : {}) };
+                          setEditItems((prev) => [...prev, newOrderItem]);
+                          setAddItemSearch('');
+                          setAddItemSelected(null);
+                          setAddItemOptions({});
+                        }}
+                        className="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold py-1.5 rounded-lg transition-colors"
+                      >
+                        + Toevoegen
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <label className="text-gray-400 text-xs mb-1 block">Status</label>
@@ -1238,6 +1412,7 @@ function SchermenTab() {
   const [newCategoryIds, setNewCategoryIds] = useState<string[]>([]);
   const [newItemIds, setNewItemIds] = useState<string[]>([]);
   const [catLoading, setCatLoading] = useState(false);
+  const [editingScreen, setEditingScreen] = useState<BarScreen | null>(null);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -1284,11 +1459,20 @@ function SchermenTab() {
   async function createScreen(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim() || !selectedEventId) return;
-    await addDoc(collection(db, 'events', selectedEventId, 'screens'), {
-      name: newName.trim(),
-      categoryIds: newCategoryIds,
-      itemIds: newItemIds,
-    });
+    if (editingScreen) {
+      await updateDoc(doc(db, 'events', selectedEventId, 'screens', editingScreen.id), {
+        name: newName.trim(),
+        categoryIds: newCategoryIds,
+        itemIds: newItemIds,
+      });
+      setEditingScreen(null);
+    } else {
+      await addDoc(collection(db, 'events', selectedEventId, 'screens'), {
+        name: newName.trim(),
+        categoryIds: newCategoryIds,
+        itemIds: newItemIds,
+      });
+    }
     setNewName('');
     setNewCategoryIds([]);
     setNewItemIds([]);
@@ -1297,6 +1481,21 @@ function SchermenTab() {
   async function deleteScreen(screenId: string) {
     if (!confirm('Scherm verwijderen?')) return;
     await deleteDoc(doc(db, 'events', selectedEventId, 'screens', screenId));
+  }
+
+  function startEditScreen(screen: BarScreen) {
+    setEditingScreen(screen);
+    setNewName(screen.name);
+    setNewCategoryIds([...screen.categoryIds]);
+    setNewItemIds([...screen.itemIds]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function cancelEditScreen() {
+    setEditingScreen(null);
+    setNewName('');
+    setNewCategoryIds([]);
+    setNewItemIds([]);
   }
 
   function toggleCategory(catId: string) {
@@ -1326,7 +1525,7 @@ function SchermenTab() {
       {selectedEventId && (
         <>
           <div className={card}>
-            <h2 className="text-base font-bold mb-4 text-white">Nieuw scherm aanmaken</h2>
+            <h2 className="text-base font-bold mb-4 text-white">{editingScreen ? `✏️ Scherm aanpassen: ${editingScreen.name}` : 'Nieuw scherm aanmaken'}</h2>
             <form onSubmit={createScreen} className="space-y-4">
               <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Schemanaam (bv. Cocktails scherm)" className={inp + ' w-full'} />
               {catLoading ? <Spinner /> : (
@@ -1354,9 +1553,16 @@ function SchermenTab() {
                   {categories.length === 0 && <p className="text-gray-500 text-sm">Geen categorieën gevonden voor dit evenement.</p>}
                 </div>
               )}
-              <button type="submit" disabled={!newName.trim()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm">
-                + Scherm aanmaken
-              </button>
+              <div className="flex gap-3">
+                <button type="submit" disabled={!newName.trim()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm">
+                  {editingScreen ? 'Opslaan' : '+ Scherm aanmaken'}
+                </button>
+                {editingScreen && (
+                  <button type="button" onClick={cancelEditScreen} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-2 px-6 rounded-lg transition-colors text-sm border border-gray-600">
+                    Annuleren
+                  </button>
+                )}
+              </div>
             </form>
           </div>
 
@@ -1387,6 +1593,9 @@ function SchermenTab() {
                       </div>
                     </div>
                     <div className="flex gap-2 shrink-0">
+                      <button onClick={() => startEditScreen(screen)} className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 font-semibold py-1.5 px-3 rounded-lg text-sm transition-colors">
+                        ✏️ Aanpassen
+                      </button>
                       <a href={`${origin}/bar/scherm/${screen.id}`} target="_blank" rel="noopener noreferrer" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-1.5 px-3 rounded-lg text-sm transition-colors">
                         Openen →
                       </a>

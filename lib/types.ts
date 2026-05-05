@@ -70,8 +70,9 @@ export interface Event {
   showPrices: boolean;
   pricePerSlot: number;
   accentColor: string;
-  drankkaartSlots: number; // default 20
-  qrLabel?: string; // label printed under QR codes
+  drankkaartSlots: number; // kept for legacy, use drankkaartPrice if set
+  drankkaartPrice?: number; // fixed euro price per drankkaart (replaces slots calculation)
+  qrLabel?: string;// label printed under QR codes
 }
 
 export interface BarScreen {
