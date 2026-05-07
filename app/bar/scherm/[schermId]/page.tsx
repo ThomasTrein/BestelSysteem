@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   collection, query, where, onSnapshot, getDocs, doc,
-  updateDoc, orderBy, Timestamp, writeBatch,
+  updateDoc, orderBy, Timestamp, writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Event, Order, OrderItem, MenuCategory, BarScreen } from '@/lib/types';
@@ -31,10 +31,16 @@ export default function SchermPage() {
   const [loading, setLoading] = useState(true);
   const [columns, setColumns] = useState<number>(2);
   const [showKlaar, setShowKlaar] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     if (checkBarAuth()) setAuthed(true);
     setColumns(getStoredColumns());
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -129,7 +135,8 @@ export default function SchermPage() {
     const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     batch.update(orderRef, {
       [`screenStatuses.${schermId}`]: true,
-      ...(allDone ? { status: 'klaar' } : {}),
+      [`screenCompletedAt.${schermId}`]: serverTimestamp(),
+      ...(allDone ? { status: 'klaar', completedAt: serverTimestamp() } : {}),
     });
     await batch.commit();
   }
@@ -140,7 +147,21 @@ export default function SchermPage() {
     await updateDoc(orderRef, {
       [`screenStatuses.${schermId}`]: false,
       status: 'besteld',
+      completedAt: null,
     });
+  }
+
+  async function toggleItemStatus(order: Order, itemIndex: number) {
+    if (!event) return;
+    const current = order.itemStatuses?.[String(itemIndex)] ?? false;
+    const newVal = !current;
+    const newItemStatuses = { ...(order.itemStatuses || {}), [String(itemIndex)]: newVal };
+    const allDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
+    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
+    const updates: Record<string, unknown> = { [`itemStatuses.${itemIndex}`]: newVal };
+    if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
+    else if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+    await updateDoc(orderRef, updates);
   }
 
   function fmt(t: unknown): string {
@@ -170,7 +191,9 @@ export default function SchermPage() {
         <p className="text-gray-400 text-center mb-6">Log in om bestellingen te bekijken</p>
         <form onSubmit={handleLogin} className="space-y-4">
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Wachtwoord" className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-400" autoFocus />
-          {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+          <div className="min-h-[1.25rem]">
+            {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+          </div>
           <button type="submit" disabled={loginLoading} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50">
             {loginLoading ? 'Controleren...' : 'Inloggen'}
           </button>
@@ -242,6 +265,8 @@ export default function SchermPage() {
                   otherPendingScreens={getOtherPendingScreens(o)}
                   itemMatchesThisScreen={itemMatchesThisScreen}
                   canMarkDone={canMarkDone}
+                  now={now}
+                  onToggleItem={(idx) => toggleItemStatus(o, idx)}
                 />
               ))}
             </div>
@@ -269,6 +294,8 @@ export default function SchermPage() {
                       otherPendingScreens={getOtherPendingScreens(o)}
                       itemMatchesThisScreen={itemMatchesThisScreen}
                       canMarkDone={canMarkDone}
+                      now={now}
+                      onToggleItem={(idx) => toggleItemStatus(o, idx)}
                     />
                   ))}
                 </div>
@@ -291,6 +318,14 @@ function groupItemsByCategory(items: OrderItem[]): { category: string; items: Or
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 0) return '0:00';
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 function SchermOrderCard({
   order,
   fmt,
@@ -300,6 +335,8 @@ function SchermOrderCard({
   otherPendingScreens,
   itemMatchesThisScreen,
   canMarkDone,
+  now,
+  onToggleItem,
 }: {
   order: Order;
   fmt: (t: unknown) => string;
@@ -309,11 +346,26 @@ function SchermOrderCard({
   otherPendingScreens: BarScreen[];
   itemMatchesThisScreen: (item: OrderItem) => boolean;
   canMarkDone: boolean;
+  now: number;
+  onToggleItem: (itemIndex: number) => void;
 }) {
   const myItems = order.items.filter(itemMatchesThisScreen);
   const groups = groupItemsByCategory(myItems);
   const multipleCategories = groups.length > 1;
   const totalVakjes = myItems.reduce((sum, i) => sum + (i.slots || 0) * i.quantity, 0);
+
+  const createdMs = order.createdAt instanceof Timestamp ? order.createdAt.toDate().getTime() : null;
+  const completedMs = order.completedAt instanceof Timestamp ? order.completedAt.toDate().getTime() : null;
+  const elapsedMs = isDone && completedMs && createdMs ? completedMs - createdMs : createdMs ? now - createdMs : null;
+
+  // Map myItems back to their original indices in order.items
+  const itemsWithIndex = order.items.map((item, originalIndex) => ({ item, originalIndex })).filter(({ item }) => itemMatchesThisScreen(item));
+  const indexedByCategory = new Map<string, { item: OrderItem; originalIndex: number }[]>();
+  for (const { item, originalIndex } of itemsWithIndex) {
+    const cat = item.categoryName || 'Overige';
+    if (!indexedByCategory.has(cat)) indexedByCategory.set(cat, []);
+    indexedByCategory.get(cat)!.push({ item, originalIndex });
+  }
 
   return (
     <div className={`bg-gray-800 border border-gray-700 rounded-xl border-l-4 p-4 ${isDone ? 'border-l-green-500 opacity-70' : 'border-l-red-500'}`}>
@@ -322,6 +374,11 @@ function SchermOrderCard({
           <p className="text-2xl font-bold text-white">{order.tableName}</p>
           {order.customerName && <p className="text-gray-300 text-sm font-medium">👤 {order.customerName}</p>}
           <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
+          {elapsedMs !== null && (
+            <span className={`text-xs font-mono font-semibold ${isDone ? 'text-green-400' : 'text-yellow-400'}`}>
+              ⏱ {formatDuration(elapsedMs)}
+            </span>
+          )}
         </div>
         {isDone ? (
           <button onClick={onUndo} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-2 px-4 rounded-lg transition-colors text-sm">
@@ -353,27 +410,36 @@ function SchermOrderCard({
               <p className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-1 mt-2 first:mt-0">{group.category}</p>
             )}
             <div className="space-y-1">
-              {group.items.map((item, i) => (
-                <div key={i} className="bg-green-500/10 border border-green-500/30 rounded-lg px-3 py-2">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-gray-100 text-base leading-tight">
-                      <span className="font-bold text-white text-lg">{item.quantity}×</span> {item.name}
-                    </p>
-                    <span className="text-gray-500 text-xs shrink-0">{(item.slots || 0) * item.quantity}vk</span>
-                  </div>
-                  {item.selectedOptions && item.selectedOptions.length > 0 && (
-                    <div className="mt-1 space-y-0.5">
-                      {item.selectedOptions.map((opt, oi) => (
-                        opt.selected.length > 0 && (
-                          <p key={oi} className="text-gray-400 text-sm">
-                            <span className="text-gray-500">{opt.groupName}:</span> {opt.selected.join(', ')}
-                          </p>
-                        )
-                      ))}
+              {(indexedByCategory.get(group.category) || []).map(({ item, originalIndex }) => {
+                const itemDone = order.itemStatuses?.[String(originalIndex)] ?? false;
+                return (
+                  <button
+                    key={originalIndex}
+                    type="button"
+                    onClick={() => onToggleItem(originalIndex)}
+                    className={`w-full text-left rounded-lg px-3 py-2 border transition-colors cursor-pointer ${itemDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-green-500/10 border-green-500/30 hover:bg-green-500/20'}`}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className={`text-base leading-tight ${itemDone ? 'line-through text-gray-400' : 'text-gray-100'}`}>
+                        <span className={`font-bold text-lg ${itemDone ? 'text-gray-400' : 'text-white'}`}>{item.quantity}×</span> {item.name}
+                        {itemDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+                      </p>
+                      <span className="text-gray-500 text-xs shrink-0">{(item.slots || 0) * item.quantity}vk</span>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {item.selectedOptions && item.selectedOptions.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {item.selectedOptions.map((opt, oi) => (
+                          opt.selected.length > 0 && (
+                            <p key={oi} className="text-gray-400 text-sm">
+                              <span className="text-gray-500">{opt.groupName}:</span> {opt.selected.join(', ')}
+                            </p>
+                          )
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}

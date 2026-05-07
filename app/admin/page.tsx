@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   collection, getDocs, addDoc, deleteDoc, doc, updateDoc,
-  query, orderBy, where, writeBatch, Timestamp, onSnapshot,
+  query, orderBy, where, writeBatch, Timestamp, onSnapshot, serverTimestamp,
 } from 'firebase/firestore';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
@@ -50,7 +50,7 @@ export default function AdminPage() {
         <p className="text-gray-400 text-center mb-6">Beheerpaneel voor KSA Bestelapp</p>
         <form onSubmit={handleLogin} className="space-y-4">
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Admin wachtwoord" className={inp + ' w-full'} autoFocus />
-          {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+          <div className="min-h-[1.25rem]">{loginError && <p className="text-red-400 text-sm">{loginError}</p>}</div>
           <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors">Inloggen</button>
         </form>
       </div>
@@ -940,20 +940,20 @@ function TafelsTab() {
 <meta charset="UTF-8">
 <title>QR Codes</title>
 <style>
-  @page { size: A4 portrait; margin: 0; }
+  @page { size: A4 landscape; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: sans-serif; }
   .page {
-    width: 210mm;
-    height: 297mm;
+    width: 297mm;
+    height: 210mm;
     display: flex;
     flex-direction: column;
     page-break-after: always;
   }
   .page:last-child { page-break-after: auto; }
   .half {
-    width: 210mm;
-    height: 148.5mm;
+    width: 297mm;
+    height: 105mm;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1057,6 +1057,7 @@ function BestellingenTab() {
   const [selectedEventId, setSelectedEventId] = useState('');
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [screens, setScreens] = useState<BarScreen[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'alle' | 'besteld' | 'klaar'>('alle');
   const [nameFilter, setNameFilter] = useState('');
@@ -1073,6 +1074,20 @@ function BestellingenTab() {
   const [addItemOptions, setAddItemOptions] = useState<Record<string, string[]>>({});
   const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
+  function fmtDuration(ms: number): string {
+    if (ms < 0) ms = 0;
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  function tsToMs(ts: unknown): number | null {
+    if (!ts) return null;
+    if (typeof ts === 'object' && ts !== null && 'toDate' in ts) return (ts as { toDate: () => Date }).toDate().getTime();
+    return null;
+  }
+
   useEffect(() => {
     getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
       const evs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event));
@@ -1085,6 +1100,13 @@ function BestellingenTab() {
   useEffect(() => {
     const ev = events.find((e) => e.id === selectedEventId) || null;
     setSelectedEvent(ev);
+    if (selectedEventId) {
+      getDocs(query(collection(db, 'events', selectedEventId, 'screens'), orderBy('createdAt'))).then((snap) => {
+        setScreens(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
+      }).catch(() => setScreens([]));
+    } else {
+      setScreens([]);
+    }
   }, [selectedEventId, events]);
 
   useEffect(() => {
@@ -1134,11 +1156,16 @@ function BestellingenTab() {
 
   async function saveEditOrder() {
     if (!editOrder) return;
-    await updateDoc(doc(db, 'events', selectedEventId, 'orders', editOrder.id), {
+    const wasKlaar = editOrder.status === 'klaar';
+    const nowKlaar = editStatus === 'klaar';
+    const update: Record<string, unknown> = {
       items: editItems,
       note: editNote,
       status: editStatus,
-    });
+    };
+    if (nowKlaar && !wasKlaar) update.completedAt = serverTimestamp();
+    if (!nowKlaar && wasKlaar) update.completedAt = null;
+    await updateDoc(doc(db, 'events', selectedEventId, 'orders', editOrder.id), update);
     setEditOrder(null);
     setEditItems([]);
     setEditEventCategories([]);
@@ -1364,6 +1391,29 @@ function BestellingenTab() {
                       <p className="font-bold text-white text-lg">{order.tableName}</p>
                       {order.customerName && <p className="text-gray-300 text-sm font-medium">👤 {order.customerName}</p>}
                       <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
+                      {(() => {
+                        const createdMs = tsToMs(order.createdAt);
+                        const completedMs = tsToMs(order.completedAt);
+                        if (createdMs && completedMs) {
+                          return <p className="text-green-400 text-xs mt-0.5">⏱ Totaal: {fmtDuration(completedMs - createdMs)}</p>;
+                        }
+                        return null;
+                      })()}
+                      {order.screenCompletedAt && Object.keys(order.screenCompletedAt).length > 0 && (
+                        <div className="mt-1 space-y-0.5">
+                          {Object.entries(order.screenCompletedAt).map(([screenId, ts]) => {
+                            const screen = screens.find((s) => s.id === screenId);
+                            const createdMs = tsToMs(order.createdAt);
+                            const doneMs = tsToMs(ts);
+                            if (!createdMs || !doneMs) return null;
+                            return (
+                              <p key={screenId} className="text-blue-400 text-xs">
+                                📺 {screen?.name || screenId}: {fmtDuration(doneMs - createdMs)}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className={`text-xs font-bold px-3 py-1 rounded-full ${order.status === 'besteld' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>

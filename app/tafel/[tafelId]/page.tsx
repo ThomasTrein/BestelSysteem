@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import {
   collection,
@@ -11,6 +11,7 @@ import {
   addDoc,
   serverTimestamp,
   orderBy,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Event, MenuCategory, MenuItem, Table, OrderItem, SelectedOption } from '@/lib/types';
@@ -64,10 +65,14 @@ export default function TafelPage() {
   const [modalError, setModalError] = useState('');
 
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showReview, setShowReview] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [alertModal, setAlertModal] = useState<{ title: string; message?: string; icon?: string } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showBackToNameConfirm, setShowBackToNameConfirm] = useState(false);
+  // Collapsed categories: all collapsed by default except drankkaarten
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const catInitialized = useRef(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('ksa_customer_theme');
@@ -105,6 +110,91 @@ export default function TafelPage() {
   }
 
   useEffect(() => { loadData(); }, [tafelId]);
+
+  // Real-time menu listener: listen to event, categories, and items per category
+  useEffect(() => {
+    const catItemsRef: Record<string, MenuItem[]> = {};
+    const catOrderRef: { id: string; data: Omit<MenuCategory, 'id' | 'items'> }[] = [];
+    let itemUnsubs: (() => void)[] = [];
+    let unsubCategories: (() => void) | undefined;
+
+    function rebuildCategories() {
+      const rebuilt = catOrderRef
+        .map((cd) => {
+          const items = (catItemsRef[cd.id] || []).filter((i) => i.available);
+          if (items.length === 0) return null;
+          return { id: cd.id, ...cd.data, items } as CategoryWithItems;
+        })
+        .filter(Boolean) as CategoryWithItems[];
+      setCategories(rebuilt);
+      // Initialize collapsed state once
+      if (!catInitialized.current && rebuilt.length > 0) {
+        catInitialized.current = true;
+        const toCollapse = new Set(rebuilt.filter((c) => !c.name.toLowerCase().includes('drank')).map((c) => c.id));
+        setCollapsedCategories(toCollapse);
+      }
+    }
+
+    const unsubEvent = onSnapshot(
+      query(collection(db, 'events'), where('active', '==', true)),
+      async (snap) => {
+        if (snap.empty) return;
+        const evDoc = snap.docs[0];
+        const ev = { id: evDoc.id, ...evDoc.data() } as Event;
+        setEvent(ev);
+
+        const tableDoc = await getDoc(doc(db, 'events', ev.id, 'tables', tafelId));
+        if (!tableDoc.exists()) { setError('Tafel niet gevonden. Controleer de QR-code.'); setLoading(false); return; }
+        setTable({ id: tableDoc.id, ...tableDoc.data() } as Table);
+
+        // Clean up old listeners
+        if (unsubCategories) { unsubCategories(); unsubCategories = undefined; }
+        itemUnsubs.forEach((u) => u());
+        itemUnsubs = [];
+        Object.keys(catItemsRef).forEach((k) => delete catItemsRef[k]);
+        catOrderRef.length = 0;
+
+        // Listen to categories
+        unsubCategories = onSnapshot(
+          query(collection(db, 'events', ev.id, 'categories'), orderBy('order')),
+          (catsSnap) => {
+            // Update catOrderRef
+            catOrderRef.length = 0;
+            for (const cd of catsSnap.docs) {
+              catOrderRef.push({ id: cd.id, data: cd.data() as Omit<MenuCategory, 'id' | 'items'> });
+            }
+
+            // Rebuild item listeners
+            itemUnsubs.forEach((u) => u());
+            itemUnsubs = [];
+
+            for (const cd of catsSnap.docs) {
+              const unsub = onSnapshot(
+                query(collection(db, 'events', ev.id, 'categories', cd.id, 'items'), orderBy('order')),
+                (itemsSnap) => {
+                  catItemsRef[cd.id] = itemsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MenuItem));
+                  rebuildCategories();
+                  setLoading(false);
+                }
+              );
+              itemUnsubs.push(unsub);
+            }
+
+            if (catsSnap.docs.length === 0) {
+              setCategories([]);
+              setLoading(false);
+            }
+          }
+        );
+      }
+    );
+
+    return () => {
+      unsubEvent();
+      if (unsubCategories) unsubCategories();
+      itemUnsubs.forEach((u) => u());
+    };
+  }, [tafelId]);
 
   async function loadData() {
     try {
@@ -250,7 +340,6 @@ export default function TafelPage() {
       setAlertModal({ title: 'Betaalmethode vereist', message: 'Selecteer hoe je de drankkaarten wil betalen.', icon: '💳' });
       return;
     }
-    setShowConfirm(false);
     try {
       setSubmitting(true);
       await addDoc(collection(db, 'events', event.id, 'orders'), {
@@ -265,6 +354,7 @@ export default function TafelPage() {
         createdAt: serverTimestamp(),
       });
       setSuccess(true);
+      setShowReview(false);
       localStorage.removeItem(`ksa_cart_${tafelId}`);
     } catch (err) {
       console.error(err);
@@ -274,14 +364,25 @@ export default function TafelPage() {
     }
   }
 
+  function toggleCategory(catId: string) {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(catId)) next.delete(catId);
+      else next.add(catId);
+      return next;
+    });
+  }
+
   function resetOrder() {
     setSimpleQty({});
     setOptionEntries([]);
     setDrankkaarten(0);
     setNote('');
     setSuccess(false);
+    setShowReview(false);
     setNameDone(false);
     setCustomerName('');
+    catInitialized.current = false;
     localStorage.removeItem(`ksa_cart_${tafelId}`);
   }
 
@@ -299,6 +400,7 @@ export default function TafelPage() {
     setDrankkaarten(0);
     setDrankkaartPaymentMethod('');
     setNote('');
+    setShowReview(false);
     setNameDone(false);
     setCustomerName('');
   }
@@ -381,6 +483,144 @@ export default function TafelPage() {
       </div>
     </div>
   );
+
+  // Review screen (order overview before placing)
+  if (showReview && nameDone && !success) {
+    const pricePerSlot = event?.pricePerSlot || 0;
+    // Build preview of order items
+    const previewItems: { name: string; quantity: number; slots: number; options?: string }[] = [];
+    for (const cat of categories) {
+      for (const item of cat.items) {
+        const qty = simpleQty[item.id] || 0;
+        if (qty > 0 && (!item.optionGroups || item.optionGroups.length === 0)) {
+          previewItems.push({ name: item.name, quantity: qty, slots: item.slots * qty });
+        }
+      }
+    }
+    // Group option entries
+    const groupedEntries = new Map<string, OptionEntry[]>();
+    for (const entry of optionEntries) {
+      const key = entry.itemId + '|' + buildOptionsKey(entry.selectedOptions);
+      if (!groupedEntries.has(key)) groupedEntries.set(key, []);
+      groupedEntries.get(key)!.push(entry);
+    }
+    for (const [, entries] of groupedEntries) {
+      const first = entries[0];
+      const optStr = first.selectedOptions.filter((o) => o.selected.length > 0).map((o) => o.selected.join(', ')).join(' · ');
+      previewItems.push({ name: first.name, quantity: entries.length, slots: first.slots * entries.length, options: optStr || undefined });
+    }
+
+    return (
+      <div className={`min-h-screen ${bg}`}>
+        <AlertModal
+          open={alertModal !== null}
+          title={alertModal?.title || ''}
+          message={alertModal?.message}
+          icon={alertModal?.icon}
+          onClose={() => setAlertModal(null)}
+          dark={isDark}
+        />
+        <header className="text-white px-4 py-4 sticky top-0 z-10 shadow-md" style={{ backgroundColor: accent }}>
+          <div className="max-w-2xl mx-auto flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowReview(false)} className="bg-white/20 hover:bg-white/30 text-white rounded-lg px-3 py-1.5 text-sm font-medium transition-colors">
+                ← Terug
+              </button>
+              <div>
+                <h1 className="text-xl font-bold">🛒 Besteloverzicht</h1>
+                <p className="text-white/70 text-sm">{table?.name} · {customerName}</p>
+              </div>
+            </div>
+            <button onClick={toggleTheme} className="bg-white/20 hover:bg-white/30 text-white rounded-full w-9 h-9 flex items-center justify-center transition-colors" aria-label="Toggle thema">
+              {isDark ? '☀️' : '🌙'}
+            </button>
+          </div>
+        </header>
+
+        <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+          <div className={`${cardBg} rounded-xl shadow-sm overflow-hidden`}>
+            <div className="px-4 py-3 border-b" style={{ borderColor: accent + '30' }}>
+              <h2 className={`font-bold ${textMain}`}>📋 Jouw bestelling</h2>
+            </div>
+            <div className="divide-y" style={{ borderColor: isDark ? '#374151' : '#f3f4f6' }}>
+              {previewItems.length === 0 && drankkaarten === 0 && (
+                <p className={`px-4 py-4 ${textSub} text-sm`}>Geen items geselecteerd.</p>
+              )}
+              {previewItems.map((item, i) => (
+                <div key={i} className="px-4 py-3 flex justify-between items-start gap-2">
+                  <div>
+                    <p className={`font-medium ${textMain}`}><span className="font-bold">{item.quantity}×</span> {item.name}</p>
+                    {item.options && <p className={`text-xs ${textSub} mt-0.5`}>{item.options}</p>}
+                  </div>
+                  <span className={`text-sm ${textSub} shrink-0`}>{item.slots} vk{event?.showPrices && pricePerSlot > 0 ? ` · €${(item.slots * pricePerSlot).toFixed(2)}` : ''}</span>
+                </div>
+              ))}
+              {drankkaarten > 0 && (
+                <div className="px-4 py-3 flex justify-between items-center">
+                  <p className="font-medium text-yellow-500">🎟️ {drankkaarten}× Drankkaart{drankkaarten !== 1 ? 'en' : ''}</p>
+                  {drankkaartPrice > 0 && <span className={`text-sm ${textSub}`}>€{(drankkaarten * drankkaartPrice).toFixed(2)}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {drankkaarten > 0 && (event?.drankkaartPaymentMethods?.length ?? 0) > 0 && (
+            <div className={`${cardBg} rounded-xl p-4 shadow-sm`}>
+              <p className={`text-sm font-semibold ${textMain} mb-3`}>💳 Betaalmethode drankkaarten</p>
+              <div className="flex flex-wrap gap-2">
+                {(event?.drankkaartPaymentMethods || []).map((method) => (
+                  <button
+                    key={method}
+                    type="button"
+                    onClick={() => setDrankkaartPaymentMethod(method)}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${drankkaartPaymentMethod === method ? 'text-white border-transparent' : isDark ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-gray-400' : 'bg-gray-100 text-gray-700 border-gray-300 hover:border-gray-400'}`}
+                    style={drankkaartPaymentMethod === method ? { backgroundColor: accent, borderColor: accent } : {}}
+                  >
+                    {method}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {note && (
+            <div className={`${cardBg} rounded-xl p-4 shadow-sm`}>
+              <p className={`text-sm font-semibold ${textMain} mb-1`}>💬 Opmerking</p>
+              <p className={`text-sm ${textSub}`}>{note}</p>
+            </div>
+          )}
+
+          {(totalVakjes > 0 || totalDrankkaartPrice > 0) && (
+            <div className={`rounded-xl px-4 py-3 flex justify-between items-center border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+              <div>
+                {totalVakjes > 0 && <p className={`font-bold ${textMain}`}>{totalVakjes} vakje{totalVakjes !== 1 ? 's' : ''}</p>}
+                {totalDrankkaartPrice > 0 && <p className={`text-sm ${textSub}`}>🎟️ {drankkaarten}× = €{totalDrankkaartPrice.toFixed(2)}</p>}
+              </div>
+              {event?.showPrices && (event?.pricePerSlot || 0) > 0 && totalVakjes > 0 && (
+                <p className="font-bold text-lg" style={{ color: accent }}>€{(totalPrice + totalDrankkaartPrice).toFixed(2)}</p>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="w-full text-white font-bold py-4 px-6 rounded-xl transition-opacity shadow-lg text-lg disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ backgroundColor: accent }}
+          >
+            {submitting ? '⏳ Bezig...' : '✓ Bestelling plaatsen'}
+          </button>
+
+          <button
+            onClick={() => setShowReview(false)}
+            className={`w-full font-semibold py-3 px-6 rounded-xl border transition-colors text-sm mb-8 ${isDark ? 'border-white/30 text-white/70 hover:bg-white/10' : 'border-gray-300 text-gray-500 hover:bg-gray-100'}`}
+          >
+            ← Nog items toevoegen
+          </button>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen ${bg}`}>
@@ -480,30 +720,6 @@ export default function TafelPage() {
         </div>
       )}
 
-      {showConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setShowConfirm(false)} />
-          <div className={`relative ${cardBg} rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center`}>
-            <div className="text-4xl mb-4">🛒</div>
-            <h2 className={`text-xl font-bold ${textMain} mb-2`}>Bestelling bevestigen</h2>
-            <p className={`${textSub} mb-6`}>Heb je alles besteld wat je wil?</p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowConfirm(false)} className={`flex-1 py-3 rounded-xl border-2 ${isDark ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'} font-semibold transition-colors`}>
-                Nog even kijken
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="flex-1 py-3 rounded-xl text-white font-bold transition-opacity hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: accent }}
-              >
-                {submitting ? 'Bezig...' : 'Ja, bevestigen!'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <header className="text-white px-4 py-4 sticky top-0 z-10 shadow-md" style={{ backgroundColor: accent }}>
         <div className="max-w-2xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -511,7 +727,7 @@ export default function TafelPage() {
               onClick={() => setShowBackToNameConfirm(true)}
               className="bg-white/20 hover:bg-white/30 text-white rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
             >
-              ← Naam wijzigen
+              ← Naam
             </button>
             <div>
               <h1 className="text-xl font-bold">🍺 {event?.name}</h1>
@@ -519,11 +735,6 @@ export default function TafelPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {totalSelected > 0 && (
-              <span className="bg-white/20 text-white font-bold rounded-full px-3 py-1 text-sm border border-white/30">
-                {totalSelected} item{totalSelected !== 1 ? 's' : ''}
-              </span>
-            )}
             <button
               onClick={toggleTheme}
               className="bg-white/20 hover:bg-white/30 text-white rounded-full w-9 h-9 flex items-center justify-center transition-colors"
@@ -536,70 +747,93 @@ export default function TafelPage() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {categories.map((cat) => (
-          <section key={cat.id}>
-            <h2 className={`text-lg font-bold ${textMain} mb-3 pb-1 border-b-2`} style={{ borderColor: accent + '60' }}>
-              {cat.name}
-            </h2>
-            <div className="space-y-3">
-              {cat.items.map((item) => {
-                const pricePerSlot = event?.pricePerSlot || 0;
-                const itemPrice = item.slots * pricePerSlot;
-                const hasOptions = item.optionGroups && item.optionGroups.length > 0;
-                const qty = getItemCount(item);
-                const itemEntries = optionEntries.filter((e) => e.itemId === item.id);
-                return (
-                  <div key={item.id} className={`${cardBg} rounded-xl p-4 shadow-sm`}>
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <p className={`font-semibold ${textMain}`}>{item.name}</p>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
-                            {item.slots} vakje{item.slots !== 1 ? 's' : ''}
-                          </span>
-                          {event?.showPrices && (
-                            <span className="text-sm font-medium" style={{ color: accent }}>
-                              €{itemPrice.toFixed(2)}
-                            </span>
-                          )}
-                          {hasOptions && <span className={`text-xs ${textSub} italic`}>Keuze vereist</span>}
-                        </div>
-                      </div>
-                      <QuantitySelector
-                        value={qty}
-                        onChange={(v) => handleQuantityChange(item, cat, v)}
-                        accent={accent}
-                        isDark={isDark}
-                      />
-                    </div>
-                    {hasOptions && itemEntries.length > 0 && (
-                      <div className={`mt-3 space-y-1.5 border-t ${borderSub} pt-2`}>
-                        {itemEntries.map((entry, idx) => (
-                          <div key={entry.uid} className="flex items-start justify-between gap-2 text-sm">
-                            <div>
-                              <span className={`${isDark ? 'text-gray-400' : 'text-gray-600'} font-medium`}>#{idx + 1}</span>
-                              {entry.selectedOptions.filter((o) => o.selected.length > 0).map((opt) => (
-                                <span key={opt.groupId} className={`${textSub} ml-2`}>
-                                  <span className={`font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{opt.groupName}:</span> {opt.selected.join(', ')}
+        {categories.map((cat) => {
+          const isDrankcat = cat.name.toLowerCase().includes('drank');
+          const isCollapsed = !isDrankcat && collapsedCategories.has(cat.id);
+          const itemsInCart = cat.items.reduce((n, item) => n + getItemCount(item), 0);
+          return (
+            <section key={cat.id}>
+              <button
+                type="button"
+                disabled={isDrankcat}
+                onClick={() => !isDrankcat && toggleCategory(cat.id)}
+                className={`w-full flex justify-between items-center text-left pb-1 border-b-2 mb-3 ${isDrankcat ? 'cursor-default' : 'cursor-pointer'}`}
+                style={{ borderColor: accent + '60' }}
+              >
+                <h2 className={`text-lg font-bold ${textMain}`}>{cat.name}</h2>
+                <div className="flex items-center gap-2">
+                  {itemsInCart > 0 && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: accent }}>
+                      {itemsInCart}
+                    </span>
+                  )}
+                  {!isDrankcat && (
+                    <span className={`text-sm ${textSub} transition-transform ${isCollapsed ? '' : 'rotate-180'}`}>▼</span>
+                  )}
+                </div>
+              </button>
+              {!isCollapsed && (
+                <div className="space-y-3">
+                  {cat.items.map((item) => {
+                    const pricePerSlot = event?.pricePerSlot || 0;
+                    const itemPrice = item.slots * pricePerSlot;
+                    const hasOptions = item.optionGroups && item.optionGroups.length > 0;
+                    const qty = getItemCount(item);
+                    const itemEntries = optionEntries.filter((e) => e.itemId === item.id);
+                    return (
+                      <div key={item.id} className={`${cardBg} rounded-xl p-4 shadow-sm`}>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1">
+                            <p className={`font-semibold ${textMain}`}>{item.name}</p>
+                            <div className="flex items-center gap-3 mt-0.5">
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
+                                {item.slots} vakje{item.slots !== 1 ? 's' : ''}
+                              </span>
+                              {event?.showPrices && (
+                                <span className="text-sm font-medium" style={{ color: accent }}>
+                                  €{itemPrice.toFixed(2)}
                                 </span>
-                              ))}
+                              )}
+                              {hasOptions && <span className={`text-xs ${textSub} italic`}>Keuze vereist</span>}
                             </div>
-                            <button
-                              onClick={() => setOptionEntries((prev) => prev.filter((e) => e.uid !== entry.uid))}
-                              className="text-red-400 hover:text-red-500 text-xs shrink-0"
-                            >
-                              ✕
-                            </button>
                           </div>
-                        ))}
+                          <QuantitySelector
+                            value={qty}
+                            onChange={(v) => handleQuantityChange(item, cat, v)}
+                            accent={accent}
+                            isDark={isDark}
+                          />
+                        </div>
+                        {hasOptions && itemEntries.length > 0 && (
+                          <div className={`mt-3 space-y-1.5 border-t ${borderSub} pt-2`}>
+                            {itemEntries.map((entry, idx) => (
+                              <div key={entry.uid} className="flex items-start justify-between gap-2 text-sm">
+                                <div>
+                                  <span className={`${isDark ? 'text-gray-400' : 'text-gray-600'} font-medium`}>#{idx + 1}</span>
+                                  {entry.selectedOptions.filter((o) => o.selected.length > 0).map((opt) => (
+                                    <span key={opt.groupId} className={`${textSub} ml-2`}>
+                                      <span className={`font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{opt.groupName}:</span> {opt.selected.join(', ')}
+                                    </span>
+                                  ))}
+                                </div>
+                                <button
+                                  onClick={() => setOptionEntries((prev) => prev.filter((e) => e.uid !== entry.uid))}
+                                  className="text-red-400 hover:text-red-500 text-xs shrink-0"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
 
         <section>
           <h2 className={`text-lg font-bold ${textMain} mb-3 pb-1 border-b-2`} style={{ borderColor: accent + '60' }}>
@@ -690,13 +924,13 @@ export default function TafelPage() {
               setAlertModal({ title: 'Bestelling leeg', message: 'Voeg minstens een item of drankkaart toe.', icon: '🛒' });
               return;
             }
-            setShowConfirm(true);
+            setShowReview(true);
           }}
           disabled={submitting || totalSelected === 0}
           className="w-full text-white font-bold py-4 px-6 rounded-xl transition-opacity shadow-lg text-lg disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ backgroundColor: accent }}
         >
-          🛒 Bestelling plaatsen
+          👀 Bestelling bekijken
         </button>
 
         {totalSelected > 0 && (

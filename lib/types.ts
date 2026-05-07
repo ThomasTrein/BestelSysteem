@@ -59,7 +59,10 @@ export interface Order {
   note: string;
   status: 'besteld' | 'klaar';
   createdAt: any;
+  completedAt?: any; // when the whole order became klaar
   screenStatuses?: Record<string, boolean>; // per-screen done tracking: screenId → isDone
+  screenCompletedAt?: Record<string, any>; // per-screen completion timestamps: screenId → Timestamp
+  itemStatuses?: Record<string, boolean>; // per-item done tracking: itemIndex → isDone
   drankkaartPaymentMethod?: string;
 }
 

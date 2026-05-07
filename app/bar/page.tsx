@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, getDocs, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, orderBy, Timestamp, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Event, Order, OrderItem, BarScreen } from '@/lib/types';
 import { checkBarAuth, loginBar, logoutBar } from '@/lib/auth';
@@ -22,10 +22,16 @@ export default function BarPage() {
   const [loading, setLoading] = useState(true);
   const [columns, setColumns] = useState<number>(2);
   const [showKlaar, setShowKlaar] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     if (checkBarAuth()) setAuthed(true);
     setColumns(getStoredColumns());
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -57,6 +63,19 @@ export default function BarPage() {
     else setLoginError('Ongeldig wachtwoord. Probeer opnieuw.');
   }
 
+  async function toggleItem(order: Order, itemIndex: number) {
+    if (!event) return;
+    const current = order.itemStatuses?.[String(itemIndex)] ?? false;
+    const newVal = !current;
+    const newItemStatuses = { ...(order.itemStatuses || {}), [String(itemIndex)]: newVal };
+    const allDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
+    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
+    const updates: Record<string, unknown> = { [`itemStatuses.${itemIndex}`]: newVal };
+    if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
+    else if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+    await updateDoc(orderRef, updates);
+  }
+
   function changeColumns(n: number) {
     setColumns(n);
     localStorage.setItem('ksa_bar_columns', String(n));
@@ -78,7 +97,9 @@ export default function BarPage() {
         <p className="text-gray-400 text-center mb-6">Log in om bestellingen te bekijken</p>
         <form onSubmit={handleLogin} className="space-y-4">
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Wachtwoord" className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-400" autoFocus />
-          {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+          <div className="min-h-[1.25rem]">
+            {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+          </div>
           <button type="submit" disabled={loginLoading} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50">
             {loginLoading ? 'Controleren...' : 'Inloggen'}
           </button>
@@ -147,7 +168,7 @@ export default function BarPage() {
           {besteld.length > 0 && (
             <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4 mb-6`}>
               {besteld.map((o) => (
-                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} />
+                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} />
               ))}
             </div>
           )}
@@ -164,7 +185,7 @@ export default function BarPage() {
               ) : (
                 <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4`}>
                   {klaar.map((o) => (
-                    <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} />
+                    <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} />
                   ))}
                 </div>
               )}
@@ -186,12 +207,39 @@ function groupItemsByCategory(items: OrderItem[]): { category: string; items: Or
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
 }
 
-function OrderCard({ order, fmt, allScreens }: { order: Order; fmt: (t: unknown) => string; allScreens: BarScreen[] }) {
+function formatDuration(ms: number): string {
+  if (ms < 0) return '0:00';
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function OrderCard({ order, fmt, allScreens, now, onToggleItem }: {
+  order: Order;
+  fmt: (t: unknown) => string;
+  allScreens: BarScreen[];
+  now: number;
+  onToggleItem: (itemIndex: number) => void;
+}) {
   const isDone = order.status === 'klaar';
   const totalVakjes = order.items.reduce((sum, i) => sum + (i.slots || 0) * i.quantity, 0);
   const groups = groupItemsByCategory(order.items);
   const multipleCategories = groups.length > 1;
   const screenStatuses = order.screenStatuses || {};
+
+  const createdMs = order.createdAt instanceof Timestamp ? order.createdAt.toDate().getTime() : null;
+  const completedMs = order.completedAt instanceof Timestamp ? order.completedAt.toDate().getTime() : null;
+  const elapsedMs = isDone && completedMs && createdMs ? completedMs - createdMs : createdMs ? now - createdMs : null;
+
+  // Build a flat list of items with their original indices for toggling
+  const flatItems: { item: OrderItem; originalIndex: number }[] = order.items.map((item, i) => ({ item, originalIndex: i }));
+  const itemsByCategory = new Map<string, { item: OrderItem; originalIndex: number }[]>();
+  for (const { item, originalIndex } of flatItems) {
+    const cat = item.categoryName || 'Overige';
+    if (!itemsByCategory.has(cat)) itemsByCategory.set(cat, []);
+    itemsByCategory.get(cat)!.push({ item, originalIndex });
+  }
 
   return (
     <div className={`bg-gray-800 border border-gray-700 rounded-xl border-l-4 p-4 ${isDone ? 'border-l-green-500 opacity-70' : 'border-l-red-500'}`}>
@@ -201,9 +249,16 @@ function OrderCard({ order, fmt, allScreens }: { order: Order; fmt: (t: unknown)
           {order.customerName && <p className="text-gray-300 text-sm font-medium">👤 {order.customerName}</p>}
           <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
         </div>
-        <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${isDone ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
-          {isDone ? '✓ Klaar' : '⏳ Wacht'}
-        </span>
+        <div className="flex flex-col items-end gap-1">
+          <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${isDone ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+            {isDone ? '✓ Klaar' : '⏳ Wacht'}
+          </span>
+          {elapsedMs !== null && (
+            <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${isDone ? 'text-green-400' : 'text-yellow-400'}`}>
+              ⏱ {formatDuration(elapsedMs)}
+            </span>
+          )}
+        </div>
       </div>
 
       {allScreens.length > 0 && (
@@ -226,27 +281,36 @@ function OrderCard({ order, fmt, allScreens }: { order: Order; fmt: (t: unknown)
               <p className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-1 mt-2 first:mt-0">{group.category}</p>
             )}
             <div className="space-y-1">
-              {group.items.map((item, i) => (
-                <div key={i} className="bg-gray-700/50 rounded-lg px-3 py-2 border border-gray-700/50">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-gray-100 text-base leading-tight">
-                      <span className="font-bold text-white text-lg">{item.quantity}×</span> {item.name}
-                    </p>
-                    <span className="text-gray-500 text-xs shrink-0">{(item.slots || 0) * item.quantity}vk</span>
-                  </div>
-                  {item.selectedOptions && item.selectedOptions.length > 0 && (
-                    <div className="mt-1 space-y-0.5">
-                      {item.selectedOptions.map((opt, oi) => (
-                        opt.selected.length > 0 && (
-                          <p key={oi} className="text-gray-400 text-sm">
-                            <span className="text-gray-500">{opt.groupName}:</span> {opt.selected.join(', ')}
-                          </p>
-                        )
-                      ))}
+              {(itemsByCategory.get(group.category) || []).map(({ item, originalIndex }) => {
+                const itemDone = order.itemStatuses?.[String(originalIndex)] ?? false;
+                return (
+                  <button
+                    key={originalIndex}
+                    type="button"
+                    onClick={() => onToggleItem(originalIndex)}
+                    className={`w-full text-left rounded-lg px-3 py-2 border transition-colors cursor-pointer ${itemDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-gray-700/50 border-gray-700/50 hover:bg-gray-700'}`}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className={`text-base leading-tight ${itemDone ? 'line-through text-gray-400' : 'text-gray-100'}`}>
+                        <span className={`font-bold text-lg ${itemDone ? 'text-gray-400' : 'text-white'}`}>{item.quantity}×</span> {item.name}
+                        {itemDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+                      </p>
+                      <span className="text-gray-500 text-xs shrink-0">{(item.slots || 0) * item.quantity}vk</span>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {item.selectedOptions && item.selectedOptions.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {item.selectedOptions.map((opt, oi) => (
+                          opt.selected.length > 0 && (
+                            <p key={oi} className="text-gray-400 text-sm">
+                              <span className="text-gray-500">{opt.groupName}:</span> {opt.selected.join(', ')}
+                            </p>
+                          )
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}
