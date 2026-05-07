@@ -9,6 +9,10 @@ import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
 import { Event, MenuCategory, MenuItem, Table, Order, OrderItem, OptionGroup, OptionChoice, BarScreen, SelectedOption } from '@/lib/types';
 import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords } from '@/lib/auth';
+import ConfirmModal from '@/components/ConfirmModal';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 type Tab = 'evenementen' | 'menu' | 'tafels' | 'bestellingen' | 'instellingen' | 'statistieken' | 'schermen';
 
@@ -108,6 +112,9 @@ function EvenementenTab() {
   const [doCopyMenu, setDoCopyMenu] = useState(false);
   const [copyFromEventId, setCopyFromEventId] = useState('');
   const [copyingMenu, setCopyingMenu] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const [newDrankkaartMethod, setNewDrankkaartMethod] = useState('');
+  const [newDrankkaartMethods, setNewDrankkaartMethods] = useState<string[]>([]);
 
   useEffect(() => {
     const unsub = onSnapshot(query(collection(db, 'events'), orderBy('startDate', 'desc')), (snap) => {
@@ -129,6 +136,7 @@ function EvenementenTab() {
       accentColor: newAccent,
       drankkaartPrice: parseFloat(newDrankkaartPrice) || 0,
       qrLabel: newQrLabel.trim() || 'Scan om te bestellen',
+      drankkaartPaymentMethods: newDrankkaartMethods,
     });
     if (doCopyMenu && copyFromEventId) {
       setCopyingMenu(true);
@@ -155,6 +163,7 @@ function EvenementenTab() {
     }
     setNewName(''); setNewStart(''); setNewEnd(''); setNewPricePerSlot(''); setNewAccent('#16a34a'); setNewDrankkaartPrice(''); setNewQrLabel('Scan om te bestellen');
     setDoCopyMenu(false); setCopyFromEventId('');
+    setNewDrankkaartMethods([]); setNewDrankkaartMethod('');
   }
 
   async function activateEvent(id: string) {
@@ -168,8 +177,11 @@ function EvenementenTab() {
   }
 
   async function deleteEvent(id: string) {
-    if (!confirm('Zeker? Dit verwijdert het evenement.')) return;
-    await deleteDoc(doc(db, 'events', id));
+    setConfirmModal({
+      title: 'Evenement verwijderen',
+      message: 'Zeker? Dit verwijdert het evenement.',
+      onConfirm: async () => { setConfirmModal(null); await deleteDoc(doc(db, 'events', id)); },
+    });
   }
 
   async function updateEventField(ev: Event, field: Partial<Event>) {
@@ -204,6 +216,42 @@ function EvenementenTab() {
           <div>
             <label className="text-gray-400 text-xs mb-1 block">Prijs per drankkaart (€)</label>
             <input type="number" step="0.01" min="0" value={newDrankkaartPrice} onChange={(e) => setNewDrankkaartPrice(e.target.value)} placeholder="10.00" className={inp + ' w-full'} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-gray-400 text-xs mb-1 block">Betaalmethoden drankkaarten</label>
+            <div className="flex gap-2">
+              <input
+                value={newDrankkaartMethod}
+                onChange={(e) => setNewDrankkaartMethod(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const v = newDrankkaartMethod.trim();
+                    if (v && !newDrankkaartMethods.includes(v)) setNewDrankkaartMethods((p) => [...p, v]);
+                    setNewDrankkaartMethod('');
+                  }
+                }}
+                placeholder="Bv. Cash, Payconiq..."
+                className={inp}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const v = newDrankkaartMethod.trim();
+                  if (v && !newDrankkaartMethods.includes(v)) setNewDrankkaartMethods((p) => [...p, v]);
+                  setNewDrankkaartMethod('');
+                }}
+                className="bg-green-700 hover:bg-green-600 text-white px-3 rounded-lg text-sm font-semibold"
+              >+</button>
+            </div>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {newDrankkaartMethods.map((m) => (
+                <span key={m} className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+                  {m}
+                  <button type="button" onClick={() => setNewDrankkaartMethods((p) => p.filter((x) => x !== m))} className="hover:text-red-400">×</button>
+                </span>
+              ))}
+            </div>
           </div>
           <div className="sm:col-span-2">
             <label className="text-gray-400 text-xs mb-1 block">QR code label (tekst onder QR bij afdrukken)</label>
@@ -286,11 +334,71 @@ function EvenementenTab() {
                 <label className="text-gray-400 text-xs shrink-0">QR label:</label>
                 <input defaultValue={ev.qrLabel || 'Scan om te bestellen'} onBlur={(e) => updateEventField(ev, { qrLabel: e.target.value.trim() || 'Scan om te bestellen' })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs flex-1 focus:outline-none" placeholder="Scan om te bestellen" />
               </div>
+              <EventPaymentMethods ev={ev} updateEventField={updateEventField} />
             </div>
           </div>
         ))}
         {events.length === 0 && <p className="text-gray-500 text-center py-8">Nog geen evenementen aangemaakt.</p>}
       </div>
+      <ConfirmModal
+        open={confirmModal !== null}
+        title={confirmModal?.title || ''}
+        message={confirmModal?.message}
+        danger={true}
+        onConfirm={() => confirmModal?.onConfirm()}
+        onCancel={() => setConfirmModal(null)}
+        dark={true}
+      />
+    </div>
+  );
+}
+
+/* -- EventPaymentMethods -- */
+function EventPaymentMethods({ ev, updateEventField }: { ev: Event; updateEventField: (ev: Event, field: Partial<Event>) => Promise<void> }) {
+  const [input, setInput] = useState('');
+  const methods = ev.drankkaartPaymentMethods || [];
+  function addMethod() {
+    const v = input.trim();
+    if (!v || methods.includes(v)) return;
+    updateEventField(ev, { drankkaartPaymentMethods: [...methods, v] });
+    setInput('');
+  }
+  function removeMethod(m: string) {
+    updateEventField(ev, { drankkaartPaymentMethods: methods.filter((x) => x !== m) });
+  }
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <label className="text-gray-400 text-xs">Betaalmethoden drankkaarten:</label>
+      <div className="flex gap-2">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMethod(); } }}
+          placeholder="Bv. Cash..."
+          className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs focus:outline-none flex-1"
+        />
+        <button type="button" onClick={addMethod} className="bg-green-700 hover:bg-green-600 text-white px-2 rounded text-xs font-bold">+</button>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {methods.map((m) => (
+          <span key={m} className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+            {m}
+            <button type="button" onClick={() => removeMethod(m)} className="hover:text-red-400">×</button>
+          </span>
+        ))}
+        {methods.length === 0 && <span className="text-gray-600 text-xs italic">Geen betaalmethoden ingesteld</span>}
+      </div>
+    </div>
+  );
+}
+
+/* -- Sortable Item wrapper for DnD -- */
+function SortableItem({ id, children }: { id: string; children: (dragHandleProps: Record<string, unknown>) => React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children({ ...attributes, ...listeners })}
     </div>
   );
 }
@@ -304,6 +412,11 @@ function MenuTab() {
   const [newCatName, setNewCatName] = useState('');
   const [newItems, setNewItems] = useState<Record<string, { name: string; slots: string; available: boolean }>>({});
   const [loading, setLoading] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   useEffect(() => {
     getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
@@ -367,8 +480,11 @@ function MenuTab() {
   }
 
   async function deleteCategory(catId: string) {
-    if (!confirm('Categorie verwijderen?')) return;
-    await deleteDoc(doc(db, 'events', selectedEventId, 'categories', catId));
+    setConfirmModal({
+      title: 'Categorie verwijderen',
+      message: 'Weet je zeker dat je deze categorie wil verwijderen?',
+      onConfirm: async () => { setConfirmModal(null); await deleteDoc(doc(db, 'events', selectedEventId, 'categories', catId)); },
+    });
   }
 
   async function addItem(catId: string) {
@@ -405,6 +521,29 @@ function MenuTab() {
     await refreshItems();
   }
 
+  async function handleCategoryDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = categories.findIndex((c) => c.id === active.id);
+    const newIndex = categories.findIndex((c) => c.id === over.id);
+    const newOrder = arrayMove(categories, oldIndex, newIndex);
+    setCategories(newOrder);
+    const batch = writeBatch(db);
+    newOrder.forEach((cat, index) => {
+      batch.update(doc(db, 'events', selectedEventId, 'categories', cat.id), { order: index });
+    });
+    await batch.commit();
+  }
+
+  function handleReorderItems(catId: string, newItems: MenuItem[]) {
+    setCategories((prev) => prev.map((c) => c.id === catId ? { ...c, items: newItems } : c));
+    const batch = writeBatch(db);
+    newItems.forEach((item, index) => {
+      batch.update(doc(db, 'events', selectedEventId, 'categories', catId, 'items', item.id), { order: index });
+    });
+    batch.commit();
+  }
+
   return (
     <div className="space-y-6">
       <div className={card}>
@@ -429,31 +568,50 @@ function MenuTab() {
           </div>
 
           {loading ? <Spinner /> : (
-            <div className="space-y-4">
-              {categories.map((cat) => (
-                <CategoryCard
-                  key={cat.id} cat={cat}
-                  pricePerSlot={selectedEvent?.pricePerSlot || 0}
-                  newItem={newItems[cat.id] || { name: '', slots: '', available: true }}
-                  onNewItemChange={(field, value) => setNewItems((prev) => ({ ...prev, [cat.id]: { ...(prev[cat.id] || { name: '', slots: '', available: true }), [field]: value } }))}
-                  onAddItem={() => addItem(cat.id)}
-                  onDeleteCategory={() => deleteCategory(cat.id)}
-                  onToggleAvailable={(item) => toggleItemAvailable(cat.id, item)}
-                  onDeleteItem={(itemId) => deleteItem(cat.id, itemId)}
-                  onUpdateItem={(item, name, slots) => updateItem(cat.id, item, name, slots)}
-                  onUpdateOptionGroups={(item, groups) => updateItemOptionGroups(cat.id, item, groups)}
-                />
-              ))}
-              {categories.length === 0 && <p className="text-gray-500 text-center py-8">Nog geen categorieën.</p>}
-            </div>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleCategoryDragEnd}>
+              <SortableContext items={categories.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-4">
+                  {categories.map((cat) => (
+                    <SortableItem key={cat.id} id={cat.id}>
+                      {(dragHandleProps) => (
+                        <CategoryCard
+                          cat={cat}
+                          pricePerSlot={selectedEvent?.pricePerSlot || 0}
+                          newItem={newItems[cat.id] || { name: '', slots: '', available: true }}
+                          onNewItemChange={(field, value) => setNewItems((prev) => ({ ...prev, [cat.id]: { ...(prev[cat.id] || { name: '', slots: '', available: true }), [field]: value } }))}
+                          onAddItem={() => addItem(cat.id)}
+                          onDeleteCategory={() => deleteCategory(cat.id)}
+                          onToggleAvailable={(item) => toggleItemAvailable(cat.id, item)}
+                          onDeleteItem={(itemId) => deleteItem(cat.id, itemId)}
+                          onUpdateItem={(item, name, slots) => updateItem(cat.id, item, name, slots)}
+                          onUpdateOptionGroups={(item, groups) => updateItemOptionGroups(cat.id, item, groups)}
+                          dragHandleProps={dragHandleProps}
+                          onReorderItems={handleReorderItems}
+                        />
+                      )}
+                    </SortableItem>
+                  ))}
+                  {categories.length === 0 && <p className="text-gray-500 text-center py-8">Nog geen categorieën.</p>}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
         </>
       )}
+      <ConfirmModal
+        open={confirmModal !== null}
+        title={confirmModal?.title || ''}
+        message={confirmModal?.message}
+        danger={true}
+        onConfirm={() => confirmModal?.onConfirm()}
+        onCancel={() => setConfirmModal(null)}
+        dark={true}
+      />
     </div>
   );
 }
 
-function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, onDeleteCategory, onToggleAvailable, onDeleteItem, onUpdateItem, onUpdateOptionGroups }: {
+function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, onDeleteCategory, onToggleAvailable, onDeleteItem, onUpdateItem, onUpdateOptionGroups, dragHandleProps, onReorderItems }: {
   cat: MenuCategory & { items: MenuItem[] };
   pricePerSlot: number;
   newItem: { name: string; slots: string; available: boolean };
@@ -464,11 +622,26 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
   onDeleteItem: (id: string) => void;
   onUpdateItem: (item: MenuItem, name: string, slots: string) => void;
   onUpdateOptionGroups: (item: MenuItem, groups: OptionGroup[]) => void;
+  dragHandleProps?: Record<string, unknown>;
+  onReorderItems?: (catId: string, newItems: MenuItem[]) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [editValues, setEditValues] = useState<Record<string, { name: string; slots: string }>>({});
   const [expandedOptions, setExpandedOptions] = useState<Record<string, boolean>>({});
   const [localOptionGroups, setLocalOptionGroups] = useState<Record<string, OptionGroup[]>>({});
+  const itemSensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  function handleItemDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = cat.items.findIndex((i) => i.id === active.id);
+    const newIndex = cat.items.findIndex((i) => i.id === over.id);
+    const newItems = arrayMove(cat.items, oldIndex, newIndex);
+    onReorderItems?.(cat.id, newItems);
+  }
 
   function getOptionGroups(item: MenuItem): OptionGroup[] {
     return localOptionGroups[item.id] ?? item.optionGroups ?? [];
@@ -520,110 +693,124 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between p-4 bg-gray-700/30 border-b border-gray-700">
-        <button onClick={() => setExpanded(!expanded)} className="font-bold text-white text-base flex items-center gap-2">
-          {expanded ? '▾' : '▸'} {cat.name}
-          <span className="text-sm font-normal text-gray-500">({cat.items.length} items)</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {dragHandleProps && (
+            <button {...(dragHandleProps as React.HTMLAttributes<HTMLButtonElement>)} className="text-gray-500 hover:text-gray-300 cursor-grab active:cursor-grabbing p-1 text-lg select-none" title="Versleep categorie">⠿</button>
+          )}
+          <button onClick={() => setExpanded(!expanded)} className="font-bold text-white text-base flex items-center gap-2">
+            {expanded ? '▾' : '▸'} {cat.name}
+            <span className="text-sm font-normal text-gray-500">({cat.items.length} items)</span>
+          </button>
+        </div>
         <button onClick={onDeleteCategory} className="text-red-400 hover:text-red-300 text-sm font-semibold">Verwijderen</button>
       </div>
 
       {expanded && (
         <div className="p-4 space-y-2">
-          {cat.items.map((item) => {
-            const ev = editValues[item.id] || { name: item.name, slots: String(item.slots || 1) };
-            const price = (parseInt(ev.slots) || 0) * pricePerSlot;
-            const optGroups = getOptionGroups(item);
-            const showOpts = expandedOptions[item.id] ?? false;
-            return (
-              <div key={item.id} className="bg-gray-700/50 rounded-lg p-3 space-y-2">
-                <div className="flex flex-wrap gap-2 items-center">
-                  <input
-                    value={ev.name}
-                    onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, name: e.target.value } }))}
-                    onBlur={() => onUpdateItem(item, ev.name, ev.slots)}
-                    className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 flex-1 min-w-28 text-sm focus:outline-none"
-                  />
-                  <div className="flex items-center gap-1">
-                    <label className="text-gray-400 text-xs">Vakjes:</label>
-                    <input
-                      type="number" min="1" step="1"
-                      value={ev.slots}
-                      onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, slots: e.target.value } }))}
-                      onBlur={() => onUpdateItem(item, ev.name, ev.slots)}
-                      className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 w-16 text-sm focus:outline-none text-center"
-                    />
-                  </div>
-                  {pricePerSlot > 0 && (
-                    <span className="text-green-400 text-xs">€{price.toFixed(2)}</span>
-                  )}
-                  <label className="flex items-center gap-1 text-sm text-gray-400 cursor-pointer">
-                    <input type="checkbox" checked={item.available} onChange={() => onToggleAvailable(item)} className="rounded" />
-                    Beschikbaar
-                  </label>
-                  <button
-                    onClick={() => setExpandedOptions((prev) => ({ ...prev, [item.id]: !showOpts }))}
-                    className={`text-xs font-semibold px-2 py-1 rounded transition-colors ${showOpts ? 'bg-blue-600/30 text-blue-400' : 'bg-gray-600 text-gray-400 hover:text-white'}`}
-                  >
-                    ⚙ Opties {optGroups.length > 0 ? `(${optGroups.length})` : ''}
-                  </button>
-                  <button onClick={() => onDeleteItem(item.id)} className="text-red-400 hover:text-red-300 text-sm">✕</button>
-                </div>
-
-                {showOpts && (
-                  <div className="border-t border-gray-600 pt-2 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider">Optiegroepen</p>
-                      <button onClick={() => addOptionGroup(item)} className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-2 py-1 rounded transition-colors">
-                        + Groep toevoegen
-                      </button>
-                    </div>
-                    {optGroups.length === 0 && <p className="text-gray-600 text-xs">Geen optiegroepen</p>}
-                    {optGroups.map((group) => (
-                      <div key={group.id} className="bg-gray-800 rounded-lg p-3 space-y-2 border border-gray-600">
+          <DndContext sensors={itemSensors} collisionDetection={closestCenter} onDragEnd={handleItemDragEnd}>
+            <SortableContext items={cat.items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              {cat.items.map((item) => (
+                <SortableItem key={item.id} id={item.id}>
+                  {(itemDragHandleProps) => {
+                    const ev = editValues[item.id] || { name: item.name, slots: String(item.slots || 1) };
+                    const price = (parseInt(ev.slots) || 0) * pricePerSlot;
+                    const optGroups = getOptionGroups(item);
+                    const showOpts = expandedOptions[item.id] ?? false;
+                    return (
+                      <div className="bg-gray-700/50 rounded-lg p-3 space-y-2">
                         <div className="flex flex-wrap gap-2 items-center">
+                          <button {...(itemDragHandleProps as React.HTMLAttributes<HTMLButtonElement>)} className="text-gray-500 hover:text-gray-300 cursor-grab active:cursor-grabbing select-none" title="Versleep item">⠿</button>
                           <input
-                            value={group.name}
-                            onChange={(e) => updateOptionGroup(item, group.id, { name: e.target.value })}
-                            className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 flex-1 min-w-24 text-sm focus:outline-none"
-                            placeholder="Groepsnaam"
+                            value={ev.name}
+                            onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, name: e.target.value } }))}
+                            onBlur={() => onUpdateItem(item, ev.name, ev.slots)}
+                            className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 flex-1 min-w-28 text-sm focus:outline-none"
                           />
-                          <select
-                            value={group.type}
-                            onChange={(e) => updateOptionGroup(item, group.id, { type: e.target.value as 'single' | 'multi' })}
-                            className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs focus:outline-none"
-                          >
-                            <option value="single">Enkelvoudig</option>
-                            <option value="multi">Meervoudig</option>
-                          </select>
-                          <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer">
-                            <input type="checkbox" checked={group.required} onChange={(e) => updateOptionGroup(item, group.id, { required: e.target.checked })} className="rounded" />
-                            Verplicht
+                          <div className="flex items-center gap-1">
+                            <label className="text-gray-400 text-xs">Vakjes:</label>
+                            <input
+                              type="number" min="1" step="1"
+                              value={ev.slots}
+                              onChange={(e) => setEditValues((prev) => ({ ...prev, [item.id]: { ...ev, slots: e.target.value } }))}
+                              onBlur={() => onUpdateItem(item, ev.name, ev.slots)}
+                              className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 w-16 text-sm focus:outline-none text-center"
+                            />
+                          </div>
+                          {pricePerSlot > 0 && (
+                            <span className="text-green-400 text-xs">€{price.toFixed(2)}</span>
+                          )}
+                          <label className="flex items-center gap-1 text-sm text-gray-400 cursor-pointer">
+                            <input type="checkbox" checked={item.available} onChange={() => onToggleAvailable(item)} className="rounded" />
+                            Beschikbaar
                           </label>
-                          <button onClick={() => removeOptionGroup(item, group.id)} className="text-red-400 hover:text-red-300 text-xs">✕ Verwijder groep</button>
-                        </div>
-                        <div className="space-y-1 pl-2">
-                          {group.choices.map((choice) => (
-                            <div key={choice.id} className="flex gap-2 items-center">
-                              <input
-                                value={choice.name}
-                                onChange={(e) => updateChoice(item, group.id, choice.id, e.target.value)}
-                                className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 flex-1 text-xs focus:outline-none"
-                                placeholder="Keuzenaam"
-                              />
-                              <button onClick={() => removeChoice(item, group.id, choice.id)} className="text-red-400 hover:text-red-300 text-xs">✕</button>
-                            </div>
-                          ))}
-                          <button onClick={() => addChoice(item, group.id)} className="text-xs text-blue-400 hover:text-blue-300 mt-1">
-                            + Keuze toevoegen
+                          <button
+                            onClick={() => setExpandedOptions((prev) => ({ ...prev, [item.id]: !showOpts }))}
+                            className={`text-xs font-semibold px-2 py-1 rounded transition-colors ${showOpts ? 'bg-blue-600/30 text-blue-400' : 'bg-gray-600 text-gray-400 hover:text-white'}`}
+                          >
+                            ⚙ Opties {optGroups.length > 0 ? `(${optGroups.length})` : ''}
                           </button>
+                          <button onClick={() => onDeleteItem(item.id)} className="text-red-400 hover:text-red-300 text-sm">✕</button>
                         </div>
+
+                        {showOpts && (
+                          <div className="border-t border-gray-600 pt-2 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider">Optiegroepen</p>
+                              <button onClick={() => addOptionGroup(item)} className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-2 py-1 rounded transition-colors">
+                                + Groep toevoegen
+                              </button>
+                            </div>
+                            {optGroups.length === 0 && <p className="text-gray-600 text-xs">Geen optiegroepen</p>}
+                            {optGroups.map((group) => (
+                              <div key={group.id} className="bg-gray-800 rounded-lg p-3 space-y-2 border border-gray-600">
+                                <div className="flex flex-wrap gap-2 items-center">
+                                  <input
+                                    value={group.name}
+                                    onChange={(e) => updateOptionGroup(item, group.id, { name: e.target.value })}
+                                    className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 flex-1 min-w-24 text-sm focus:outline-none"
+                                    placeholder="Groepsnaam"
+                                  />
+                                  <select
+                                    value={group.type}
+                                    onChange={(e) => updateOptionGroup(item, group.id, { type: e.target.value as 'single' | 'multi' })}
+                                    className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs focus:outline-none"
+                                  >
+                                    <option value="single">Enkelvoudig</option>
+                                    <option value="multi">Meervoudig</option>
+                                  </select>
+                                  <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer">
+                                    <input type="checkbox" checked={group.required} onChange={(e) => updateOptionGroup(item, group.id, { required: e.target.checked })} className="rounded" />
+                                    Verplicht
+                                  </label>
+                                  <button onClick={() => removeOptionGroup(item, group.id)} className="text-red-400 hover:text-red-300 text-xs">✕ Verwijder groep</button>
+                                </div>
+                                <div className="space-y-1 pl-2">
+                                  {group.choices.map((choice) => (
+                                    <div key={choice.id} className="flex gap-2 items-center">
+                                      <input
+                                        value={choice.name}
+                                        onChange={(e) => updateChoice(item, group.id, choice.id, e.target.value)}
+                                        className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 flex-1 text-xs focus:outline-none"
+                                        placeholder="Keuzenaam"
+                                      />
+                                      <button onClick={() => removeChoice(item, group.id, choice.id)} className="text-red-400 hover:text-red-300 text-xs">✕</button>
+                                    </div>
+                                  ))}
+                                  <button onClick={() => addChoice(item, group.id)} className="text-xs text-blue-400 hover:text-blue-300 mt-1">
+                                    + Keuze toevoegen
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                    );
+                  }}
+                </SortableItem>
+              ))}
+            </SortableContext>
+          </DndContext>
           <div className="flex flex-wrap gap-2 items-center border-t border-gray-700 pt-3 mt-1">
             <input value={newItem.name} onChange={(e) => onNewItemChange('name', e.target.value)} placeholder="Naam item" className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1.5 flex-1 min-w-28 text-sm focus:outline-none placeholder-gray-500" />
             <div className="flex items-center gap-1">
@@ -652,6 +839,7 @@ function TafelsTab() {
   const [newTableName, setNewTableName] = useState('');
   const [origin, setOrigin] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -679,8 +867,11 @@ function TafelsTab() {
   }
 
   async function deleteTable(tableId: string) {
-    if (!confirm('Tafel verwijderen?')) return;
-    await deleteDoc(doc(db, 'events', selectedEventId, 'tables', tableId));
+    setConfirmModal({
+      title: 'Tafel verwijderen',
+      message: 'Weet je zeker dat je deze tafel wil verwijderen?',
+      onConfirm: async () => { setConfirmModal(null); await deleteDoc(doc(db, 'events', selectedEventId, 'tables', tableId)); },
+    });
   }
 
   function downloadSingleQR(table: Table) {
@@ -720,36 +911,64 @@ function TafelsTab() {
     const label = event?.qrLabel || 'Scan om te bestellen';
     const win = window.open('', '_blank', 'width=800,height=600');
     if (!win) return;
-    const pagesHtml = tables.map((table) => {
+
+    function halfHtml(table: Table) {
       const url = `${origin}/tafel/${table.id}`;
-      // Use Google Chart API for QR in print window (no React needed)
-      const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
+      const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(url)}`;
       return `
+          <div class="half">
+            <img src="${qrSrc}" width="320" height="320" alt="QR ${table.name}" />
+            <p class="table-name">${table.name}</p>
+            <p class="label">${label}</p>
+          </div>`;
+    }
+
+    const pages: string[] = [];
+    for (let i = 0; i < tables.length; i += 2) {
+      const tableA = tables[i];
+      const tableB = tables[i + 1];
+      pages.push(`
         <div class="page">
-          <img src="${qrSrc}" width="300" height="300" alt="QR ${table.name}" />
-          <p class="label">${label}</p>
-          <p class="table-name">${table.name}</p>
-        </div>`;
-    }).join('');
+          ${halfHtml(tableA)}
+          <div class="cut-line"></div>
+          ${tableB ? halfHtml(tableB) : '<div class="half"></div>'}
+        </div>`);
+    }
+
     win.document.write(`<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
 <title>QR Codes</title>
 <style>
-  @page { size: A5; margin: 12mm; }
+  @page { size: A4 portrait; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: sans-serif; }
   .page {
-    width: 100%; height: 190mm;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    text-align: center; page-break-after: always;
+    width: 210mm;
+    height: 297mm;
+    display: flex;
+    flex-direction: column;
+    page-break-after: always;
   }
   .page:last-child { page-break-after: auto; }
-  .label { margin-top: 18px; font-size: 22px; font-weight: bold; color: #111; }
-  .table-name { margin-top: 8px; font-size: 17px; color: #555; }
+  .half {
+    width: 210mm;
+    height: 148.5mm;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .cut-line {
+    width: 100%;
+    border-top: 2px dashed #aaa;
+    flex-shrink: 0;
+  }
+  .table-name { margin-top: 14px; font-size: 28px; font-weight: bold; color: #111; }
+  .label { margin-top: 6px; font-size: 18px; color: #555; }
 </style>
-</head><body>${pagesHtml}<script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}<\/script></body></html>`);
+</head><body>${pages.join('')}<script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}<\/script></body></html>`);
     win.document.close();
   }
 
@@ -819,6 +1038,15 @@ function TafelsTab() {
 
         </>
       )}
+      <ConfirmModal
+        open={confirmModal !== null}
+        title={confirmModal?.title || ''}
+        message={confirmModal?.message}
+        danger={true}
+        onConfirm={() => confirmModal?.onConfirm()}
+        onCancel={() => setConfirmModal(null)}
+        dark={true}
+      />
     </div>
   );
 }
@@ -843,6 +1071,7 @@ function BestellingenTab() {
   const [addItemSelected, setAddItemSelected] = useState<MenuItem | null>(null);
   const [addItemCat, setAddItemCat] = useState<(MenuCategory & { items: MenuItem[] }) | null>(null);
   const [addItemOptions, setAddItemOptions] = useState<Record<string, string[]>>({});
+  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     getDocs(query(collection(db, 'events'), orderBy('startDate', 'desc'))).then((snap) => {
@@ -872,8 +1101,11 @@ function BestellingenTab() {
   }, [selectedEventId]);
 
   async function deleteOrder(orderId: string) {
-    if (!confirm('Bestelling verwijderen?')) return;
-    await deleteDoc(doc(db, 'events', selectedEventId, 'orders', orderId));
+    setConfirmModal({
+      title: 'Bestelling verwijderen',
+      message: 'Weet je zeker dat je deze bestelling wil verwijderen?',
+      onConfirm: async () => { setConfirmModal(null); await deleteDoc(doc(db, 'events', selectedEventId, 'orders', orderId)); },
+    });
   }
 
   function openEditOrder(order: Order) {
@@ -1160,6 +1392,15 @@ function BestellingenTab() {
           )}
         </>
       )}
+      <ConfirmModal
+        open={confirmModal !== null}
+        title={confirmModal?.title || ''}
+        message={confirmModal?.message}
+        danger={true}
+        onConfirm={() => confirmModal?.onConfirm()}
+        onCancel={() => setConfirmModal(null)}
+        dark={true}
+      />
     </div>
   );
 }
@@ -1411,8 +1652,10 @@ function SchermenTab() {
   const [newName, setNewName] = useState('');
   const [newCategoryIds, setNewCategoryIds] = useState<string[]>([]);
   const [newItemIds, setNewItemIds] = useState<string[]>([]);
+  const [newCanMarkDone, setNewCanMarkDone] = useState(true);
   const [catLoading, setCatLoading] = useState(false);
   const [editingScreen, setEditingScreen] = useState<BarScreen | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -1464,6 +1707,7 @@ function SchermenTab() {
         name: newName.trim(),
         categoryIds: newCategoryIds,
         itemIds: newItemIds,
+        canMarkDone: newCanMarkDone,
       });
       setEditingScreen(null);
     } else {
@@ -1471,16 +1715,21 @@ function SchermenTab() {
         name: newName.trim(),
         categoryIds: newCategoryIds,
         itemIds: newItemIds,
+        canMarkDone: newCanMarkDone,
       });
     }
     setNewName('');
     setNewCategoryIds([]);
     setNewItemIds([]);
+    setNewCanMarkDone(true);
   }
 
   async function deleteScreen(screenId: string) {
-    if (!confirm('Scherm verwijderen?')) return;
-    await deleteDoc(doc(db, 'events', selectedEventId, 'screens', screenId));
+    setConfirmModal({
+      title: 'Scherm verwijderen',
+      message: 'Weet je zeker dat je dit scherm wil verwijderen?',
+      onConfirm: async () => { setConfirmModal(null); await deleteDoc(doc(db, 'events', selectedEventId, 'screens', screenId)); },
+    });
   }
 
   function startEditScreen(screen: BarScreen) {
@@ -1488,6 +1737,7 @@ function SchermenTab() {
     setNewName(screen.name);
     setNewCategoryIds([...screen.categoryIds]);
     setNewItemIds([...screen.itemIds]);
+    setNewCanMarkDone(screen.canMarkDone !== false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -1496,6 +1746,7 @@ function SchermenTab() {
     setNewName('');
     setNewCategoryIds([]);
     setNewItemIds([]);
+    setNewCanMarkDone(true);
   }
 
   function toggleCategory(catId: string) {
@@ -1563,6 +1814,10 @@ function SchermenTab() {
                   </button>
                 )}
               </div>
+              <label className="flex items-center gap-2 cursor-pointer mt-1">
+                <input type="checkbox" checked={newCanMarkDone} onChange={(e) => setNewCanMarkDone(e.target.checked)} className="rounded" />
+                <span className="text-gray-300 text-sm">Kan bestellingen als klaar markeren</span>
+              </label>
             </form>
           </div>
 
@@ -1578,6 +1833,9 @@ function SchermenTab() {
                       <p className="font-bold text-white">{screen.name}</p>
                       <p className="text-gray-400 text-xs font-mono mt-1 break-all">{origin}/bar/scherm/{screen.id}</p>
                       <div className="flex flex-wrap gap-1 mt-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${screen.canMarkDone !== false ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'bg-gray-700 text-gray-500 border-gray-600'}`}>
+                          {screen.canMarkDone !== false ? '✓ Klaar-knop aan' : '✗ Klaar-knop uit'}
+                        </span>
                         {screen.categoryIds.map((catId) => {
                           const cat = categories.find((c) => c.id === catId);
                           return cat ? (
@@ -1610,6 +1868,15 @@ function SchermenTab() {
           </div>
         </>
       )}
+      <ConfirmModal
+        open={confirmModal !== null}
+        title={confirmModal?.title || ''}
+        message={confirmModal?.message}
+        danger={true}
+        onConfirm={() => confirmModal?.onConfirm()}
+        onCancel={() => setConfirmModal(null)}
+        dark={true}
+      />
     </div>
   );
 }

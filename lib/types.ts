@@ -59,6 +59,8 @@ export interface Order {
   note: string;
   status: 'besteld' | 'klaar';
   createdAt: any;
+  screenStatuses?: Record<string, boolean>; // per-screen done tracking: screenId → isDone
+  drankkaartPaymentMethod?: string;
 }
 
 export interface Event {
@@ -73,6 +75,7 @@ export interface Event {
   drankkaartSlots: number; // kept for legacy, use drankkaartPrice if set
   drankkaartPrice?: number; // fixed euro price per drankkaart (replaces slots calculation)
   qrLabel?: string;// label printed under QR codes
+  drankkaartPaymentMethods?: string[];
 }
 
 export interface BarScreen {
@@ -80,4 +83,5 @@ export interface BarScreen {
   name: string;
   categoryIds: string[]; // show all items from these categories
   itemIds: string[];     // show only specific items (by itemId) — empty = show full category
+  canMarkDone?: boolean; // whether this screen can mark orders as done (default: true)
 }

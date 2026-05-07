@@ -15,6 +15,8 @@ import {
 import { db } from '@/lib/firebase';
 import { Event, MenuCategory, MenuItem, Table, OrderItem, SelectedOption } from '@/lib/types';
 import QuantitySelector from '@/components/QuantitySelector';
+import ConfirmModal from '@/components/ConfirmModal';
+import AlertModal from '@/components/AlertModal';
 
 interface CategoryWithItems extends MenuCategory {
   items: MenuItem[];
@@ -50,6 +52,7 @@ export default function TafelPage() {
   const [simpleQty, setSimpleQty] = useState<Record<string, number>>({});
   const [optionEntries, setOptionEntries] = useState<OptionEntry[]>([]);
   const [drankkaarten, setDrankkaarten] = useState(0);
+  const [drankkaartPaymentMethod, setDrankkaartPaymentMethod] = useState('');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -62,6 +65,9 @@ export default function TafelPage() {
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const [alertModal, setAlertModal] = useState<{ title: string; message?: string; icon?: string } | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showBackToNameConfirm, setShowBackToNameConfirm] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('ksa_customer_theme');
@@ -75,6 +81,7 @@ export default function TafelPage() {
         if (cart.simpleQty) setSimpleQty(cart.simpleQty);
         if (cart.optionEntries) setOptionEntries(cart.optionEntries);
         if (cart.drankkaarten !== undefined) setDrankkaarten(cart.drankkaarten);
+        if (cart.drankkaartPaymentMethod !== undefined) setDrankkaartPaymentMethod(cart.drankkaartPaymentMethod);
         if (cart.note !== undefined) setNote(cart.note);
       } catch {}
     }
@@ -83,9 +90,13 @@ export default function TafelPage() {
   // Save cart to localStorage on every change
   useEffect(() => {
     if (!success) {
-      localStorage.setItem(`ksa_cart_${tafelId}`, JSON.stringify({ customerName, nameDone, simpleQty, optionEntries, drankkaarten, note }));
+      localStorage.setItem(`ksa_cart_${tafelId}`, JSON.stringify({ customerName, nameDone, simpleQty, optionEntries, drankkaarten, drankkaartPaymentMethod, note }));
     }
-  }, [customerName, nameDone, simpleQty, optionEntries, drankkaarten, note, success, tafelId]);
+  }, [customerName, nameDone, simpleQty, optionEntries, drankkaarten, drankkaartPaymentMethod, note, success, tafelId]);
+
+  useEffect(() => {
+    if (drankkaarten === 0) setDrankkaartPaymentMethod('');
+  }, [drankkaarten]);
 
   function toggleTheme() {
     const newDark = !isDark;
@@ -231,7 +242,12 @@ export default function TafelPage() {
       });
     }
     if (orderItems.length === 0 && drankkaarten === 0) {
-      alert('Voeg minstens een item of drankkaart toe.');
+      setAlertModal({ title: 'Bestelling leeg', message: 'Voeg minstens een item of drankkaart toe.', icon: '🛒' });
+      return;
+    }
+    const availableMethods = event?.drankkaartPaymentMethods || [];
+    if (drankkaarten > 0 && availableMethods.length > 0 && !drankkaartPaymentMethod) {
+      setAlertModal({ title: 'Betaalmethode vereist', message: 'Selecteer hoe je de drankkaarten wil betalen.', icon: '💳' });
       return;
     }
     setShowConfirm(false);
@@ -243,6 +259,7 @@ export default function TafelPage() {
         customerName: customerName.trim(),
         items: orderItems,
         drankkaarten,
+        drankkaartPaymentMethod: drankkaarten > 0 ? drankkaartPaymentMethod : '',
         note,
         status: 'besteld',
         createdAt: serverTimestamp(),
@@ -251,7 +268,7 @@ export default function TafelPage() {
       localStorage.removeItem(`ksa_cart_${tafelId}`);
     } catch (err) {
       console.error(err);
-      alert('Fout bij het plaatsen van de bestelling. Probeer opnieuw.');
+      setAlertModal({ title: 'Fout', message: 'Er is een fout opgetreden. Probeer opnieuw.', icon: '⚠️' });
     } finally {
       setSubmitting(false);
     }
@@ -266,6 +283,24 @@ export default function TafelPage() {
     setNameDone(false);
     setCustomerName('');
     localStorage.removeItem(`ksa_cart_${tafelId}`);
+  }
+
+  function clearOrder() {
+    setSimpleQty({});
+    setOptionEntries([]);
+    setDrankkaarten(0);
+    setDrankkaartPaymentMethod('');
+    setNote('');
+  }
+
+  function goBackToName() {
+    setSimpleQty({});
+    setOptionEntries([]);
+    setDrankkaarten(0);
+    setDrankkaartPaymentMethod('');
+    setNote('');
+    setNameDone(false);
+    setCustomerName('');
   }
 
   const accent = event?.accentColor || '#16a34a';
@@ -349,6 +384,38 @@ export default function TafelPage() {
 
   return (
     <div className={`min-h-screen ${bg}`}>
+      <AlertModal
+        open={alertModal !== null}
+        title={alertModal?.title || ''}
+        message={alertModal?.message}
+        icon={alertModal?.icon}
+        onClose={() => setAlertModal(null)}
+        dark={isDark}
+      />
+      <ConfirmModal
+        open={showClearConfirm}
+        title="Bestelling leegmaken"
+        message="Wil je alle geselecteerde items verwijderen?"
+        icon="🗑️"
+        confirmLabel="Ja, leegmaken"
+        cancelLabel="Annuleren"
+        danger={true}
+        onConfirm={() => { clearOrder(); setShowClearConfirm(false); }}
+        onCancel={() => setShowClearConfirm(false)}
+        dark={isDark}
+      />
+      <ConfirmModal
+        open={showBackToNameConfirm}
+        title="Terug naar naam"
+        message="Je huidige bestelling wordt verwijderd. Weet je het zeker?"
+        icon="👤"
+        confirmLabel="Ja, terug"
+        cancelLabel="Annuleren"
+        danger={true}
+        onConfirm={() => { goBackToName(); setShowBackToNameConfirm(false); }}
+        onCancel={() => setShowBackToNameConfirm(false)}
+        dark={isDark}
+      />
       {modalItem && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/60" onClick={closeModal} />
@@ -439,9 +506,17 @@ export default function TafelPage() {
 
       <header className="text-white px-4 py-4 sticky top-0 z-10 shadow-md" style={{ backgroundColor: accent }}>
         <div className="max-w-2xl mx-auto flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-bold">🍺 {event?.name}</h1>
-            <p className="text-white/70 text-sm">Tafel: {table?.name} · {customerName}</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBackToNameConfirm(true)}
+              className="bg-white/20 hover:bg-white/30 text-white rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+            >
+              ← Naam wijzigen
+            </button>
+            <div>
+              <h1 className="text-xl font-bold">🍺 {event?.name}</h1>
+              <p className="text-white/70 text-sm">{table?.name} · {customerName}</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {totalSelected > 0 && (
@@ -530,19 +605,45 @@ export default function TafelPage() {
           <h2 className={`text-lg font-bold ${textMain} mb-3 pb-1 border-b-2`} style={{ borderColor: accent + '60' }}>
             Drankkaarten
           </h2>
-          <div className={`${cardBg} rounded-xl p-4 shadow-sm flex items-center justify-between gap-4`}>
-            <div className="flex-1">
-              <p className={`font-semibold ${textMain}`}>🎟️ Drankkaarten</p>
-              <div className="flex items-center gap-3 mt-0.5">
-                {drankkaartPrice > 0 && (
-                  <span className="text-sm font-medium" style={{ color: accent }}>
-                    €{drankkaartPrice.toFixed(2)} per drankkaart
-                  </span>
-                )}
+          <div className={`${cardBg} rounded-xl p-4 shadow-sm`}>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1">
+                <p className={`font-semibold ${textMain}`}>🎟️ Drankkaarten</p>
+                <div className="flex items-center gap-3 mt-0.5">
+                  {drankkaartPrice > 0 && (
+                    <span className="text-sm font-medium" style={{ color: accent }}>
+                      €{drankkaartPrice.toFixed(2)} per drankkaart
+                    </span>
+                  )}
+                </div>
+                <p className={`${textSub} text-sm mt-1`}>Heb je nog drankkaarten nodig?</p>
               </div>
-              <p className={`${textSub} text-sm mt-1`}>Heb je nog drankkaarten nodig?</p>
+              <QuantitySelector value={drankkaarten} onChange={setDrankkaarten} accent={accent} isDark={isDark} />
             </div>
-            <QuantitySelector value={drankkaarten} onChange={setDrankkaarten} accent={accent} isDark={isDark} />
+            {drankkaarten > 0 && (event?.drankkaartPaymentMethods?.length ?? 0) > 0 && (
+              <div className="mt-3">
+                <p className={`text-sm font-medium ${textMain} mb-2`}>💳 Betaalmethode drankkaarten</p>
+                <div className="flex flex-wrap gap-2">
+                  {(event?.drankkaartPaymentMethods || []).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setDrankkaartPaymentMethod(method)}
+                      className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                        drankkaartPaymentMethod === method
+                          ? 'text-white border-transparent'
+                          : isDark
+                          ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-gray-400'
+                          : 'bg-gray-100 text-gray-700 border-gray-300 hover:border-gray-400'
+                      }`}
+                      style={drankkaartPaymentMethod === method ? { backgroundColor: accent, borderColor: accent } : {}}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -586,17 +687,26 @@ export default function TafelPage() {
         <button
           onClick={() => {
             if (totalSelected === 0) {
-              alert('Voeg minstens een item of drankkaart toe.');
+              setAlertModal({ title: 'Bestelling leeg', message: 'Voeg minstens een item of drankkaart toe.', icon: '🛒' });
               return;
             }
             setShowConfirm(true);
           }}
           disabled={submitting || totalSelected === 0}
-          className="w-full text-white font-bold py-4 px-6 rounded-xl transition-opacity shadow-lg text-lg mb-8 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full text-white font-bold py-4 px-6 rounded-xl transition-opacity shadow-lg text-lg disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ backgroundColor: accent }}
         >
           🛒 Bestelling plaatsen
         </button>
+
+        {totalSelected > 0 && (
+          <button
+            onClick={() => setShowClearConfirm(true)}
+            className={`w-full font-semibold py-3 px-6 rounded-xl border transition-colors text-sm mb-8 ${isDark ? 'border-white/30 text-white/70 hover:bg-white/10' : 'border-gray-300 text-gray-500 hover:bg-gray-100'}`}
+          >
+            🗑️ Bestelling leegmaken
+          </button>
+        )}
       </main>
     </div>
   );

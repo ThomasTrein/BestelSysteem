@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, getDocs, doc, updateDoc, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Event, Order, OrderItem } from '@/lib/types';
+import { Event, Order, OrderItem, BarScreen } from '@/lib/types';
 import { checkBarAuth, loginBar, logoutBar } from '@/lib/auth';
 
 function getStoredColumns(): number {
@@ -18,6 +18,7 @@ export default function BarPage() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [event, setEvent] = useState<Event | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [allScreens, setAllScreens] = useState<BarScreen[]>([]);
   const [loading, setLoading] = useState(true);
   const [columns, setColumns] = useState<number>(2);
   const [showKlaar, setShowKlaar] = useState(false);
@@ -36,6 +37,8 @@ export default function BarPage() {
       if (snap.empty) { setLoading(false); return; }
       const ev = { id: snap.docs[0].id, ...snap.docs[0].data() } as Event;
       setEvent(ev);
+      const screensSnap = await getDocs(collection(db, 'events', ev.id, 'screens'));
+      setAllScreens(screensSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
       unsub = onSnapshot(
         query(collection(db, 'events', ev.id, 'orders'), orderBy('createdAt', 'asc')),
         (s) => { setOrders(s.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)); setLoading(false); }
@@ -59,16 +62,9 @@ export default function BarPage() {
     localStorage.setItem('ksa_bar_columns', String(n));
   }
 
-  async function toggleStatus(order: Order) {
-    if (!event) return;
-    await updateDoc(doc(db, 'events', event.id, 'orders', order.id), {
-      status: order.status === 'besteld' ? 'klaar' : 'besteld',
-    });
-  }
-
-  function fmt(t: any): string {
+  function fmt(t: unknown): string {
     if (!t) return '';
-    try { return (t instanceof Timestamp ? t.toDate() : new Date(t)).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }); }
+    try { return (t instanceof Timestamp ? t.toDate() : new Date(t as string)).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }); }
     catch { return ''; }
   }
 
@@ -91,8 +87,8 @@ export default function BarPage() {
     </div>
   );
 
-  const besteld = orders.filter((o) => o.status === 'besteld'); // oldest first from Firestore asc
-  const klaar = [...orders.filter((o) => o.status === 'klaar')].reverse(); // newest first
+  const besteld = orders.filter((o) => o.status === 'besteld');
+  const klaar = [...orders.filter((o) => o.status === 'klaar')].reverse();
 
   const colClass: Record<number, string> = {
     1: 'grid-cols-1',
@@ -117,20 +113,12 @@ export default function BarPage() {
             )}
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {/* Column selector */}
             <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
               <span className="text-gray-400 text-xs px-1">Kolommen:</span>
               {[1, 2, 3, 4].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => changeColumns(n)}
-                  className={`w-7 h-7 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}
-                >
-                  {n}
-                </button>
+                <button key={n} onClick={() => changeColumns(n)} className={`w-7 h-7 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
               ))}
             </div>
-            {/* Klaar toggle */}
             <button
               onClick={() => setShowKlaar((v) => !v)}
               className={`flex items-center gap-2 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm border ${showKlaar ? 'bg-green-600/20 border-green-500/40 text-green-400' : 'bg-gray-700 border-gray-600 text-gray-300 hover:text-white'}`}
@@ -138,10 +126,7 @@ export default function BarPage() {
               ✓ Klaar
               <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${showKlaar ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{klaar.length}</span>
             </button>
-            <button
-              onClick={() => { logoutBar(); setAuthed(false); setOrders([]); setEvent(null); }}
-              className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm"
-            >
+            <button onClick={() => { logoutBar(); setAuthed(false); setOrders([]); setEvent(null); }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm">
               Afmelden
             </button>
           </div>
@@ -162,7 +147,7 @@ export default function BarPage() {
           {besteld.length > 0 && (
             <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4 mb-6`}>
               {besteld.map((o) => (
-                <OrderCard key={o.id} order={o} fmt={fmt} onToggle={() => toggleStatus(o)} />
+                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} />
               ))}
             </div>
           )}
@@ -179,7 +164,7 @@ export default function BarPage() {
               ) : (
                 <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4`}>
                   {klaar.map((o) => (
-                    <OrderCard key={o.id} order={o} fmt={fmt} onToggle={() => toggleStatus(o)} />
+                    <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} />
                   ))}
                 </div>
               )}
@@ -201,11 +186,12 @@ function groupItemsByCategory(items: OrderItem[]): { category: string; items: Or
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
 }
 
-function OrderCard({ order, fmt, onToggle }: { order: Order; fmt: (t: any) => string; onToggle: () => void }) {
+function OrderCard({ order, fmt, allScreens }: { order: Order; fmt: (t: unknown) => string; allScreens: BarScreen[] }) {
   const isDone = order.status === 'klaar';
   const totalVakjes = order.items.reduce((sum, i) => sum + (i.slots || 0) * i.quantity, 0);
   const groups = groupItemsByCategory(order.items);
   const multipleCategories = groups.length > 1;
+  const screenStatuses = order.screenStatuses || {};
 
   return (
     <div className={`bg-gray-800 border border-gray-700 rounded-xl border-l-4 p-4 ${isDone ? 'border-l-green-500 opacity-70' : 'border-l-red-500'}`}>
@@ -215,13 +201,23 @@ function OrderCard({ order, fmt, onToggle }: { order: Order; fmt: (t: any) => st
           {order.customerName && <p className="text-gray-300 text-sm font-medium">👤 {order.customerName}</p>}
           <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
         </div>
-        <button
-          onClick={onToggle}
-          className={`font-semibold py-2 px-4 rounded-lg transition-colors text-sm ${isDone ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' : 'bg-green-600 hover:bg-green-700 text-white'}`}
-        >
-          {isDone ? '↩ Herstel' : '✓ Klaar'}
-        </button>
+        <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${isDone ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+          {isDone ? '✓ Klaar' : '⏳ Wacht'}
+        </span>
       </div>
+
+      {allScreens.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-3">
+          {allScreens.map((s) => {
+            const done = screenStatuses[s.id] === true;
+            return (
+              <span key={s.id} className={`text-xs px-2 py-0.5 rounded-full border font-medium ${done ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'bg-gray-700 text-gray-500 border-gray-600'}`}>
+                {done ? '✓' : '⏳'} {s.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       <div className="space-y-2">
         {groups.map((group, gi) => (
@@ -257,7 +253,14 @@ function OrderCard({ order, fmt, onToggle }: { order: Order; fmt: (t: any) => st
 
         {order.drankkaarten > 0 && (
           <div className="bg-yellow-400/10 border border-yellow-400/20 rounded-lg px-3 py-2">
-            <p className="text-yellow-400 font-semibold">🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}</p>
+            <p className="text-yellow-400 font-semibold">
+              🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}
+              {order.drankkaartPaymentMethod && (
+                <span className="ml-2 text-sm font-normal bg-yellow-400/20 px-2 py-0.5 rounded-full">
+                  💳 {order.drankkaartPaymentMethod}
+                </span>
+              )}
+            </p>
           </div>
         )}
         {order.note && (
@@ -274,4 +277,3 @@ function OrderCard({ order, fmt, onToggle }: { order: Order; fmt: (t: any) => st
     </div>
   );
 }
-
