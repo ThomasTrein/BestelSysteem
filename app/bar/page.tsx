@@ -96,11 +96,9 @@ export default function BarPage() {
         <h1 className="text-2xl font-bold text-white mb-2 text-center">🍹 Barscherm</h1>
         <p className="text-gray-400 text-center mb-6">Log in om bestellingen te bekijken</p>
         <form onSubmit={handleLogin} className="space-y-4">
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Wachtwoord" className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-400" autoFocus />
-          <div className="min-h-[1.25rem]">
-            {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
-          </div>
-          <button type="submit" disabled={loginLoading} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50">
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Wachtwoord" className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] placeholder-gray-400" autoFocus />
+          {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+          <button type="submit" disabled={loginLoading} className="w-full bg-[var(--accent)] hover:brightness-90 text-white font-bold py-3 rounded-lg transition-all disabled:opacity-50">
             {loginLoading ? 'Controleren...' : 'Inloggen'}
           </button>
         </form>
@@ -137,7 +135,7 @@ export default function BarPage() {
             <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
               <span className="text-gray-400 text-xs px-1">Kolommen:</span>
               {[1, 2, 3, 4].map((n) => (
-                <button key={n} onClick={() => changeColumns(n)} className={`w-7 h-7 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
+                <button key={n} onClick={() => changeColumns(n)} className={`w-7 h-7 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-[var(--accent)] text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
               ))}
             </div>
             <button
@@ -156,7 +154,7 @@ export default function BarPage() {
 
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)]"></div>
         </div>
       ) : !event ? (
         <div className="flex items-center justify-center h-64 text-gray-500 text-xl">Geen actief evenement gevonden.</div>

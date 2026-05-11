@@ -127,11 +127,10 @@ export default function TafelPage() {
         })
         .filter(Boolean) as CategoryWithItems[];
       setCategories(rebuilt);
-      // Initialize collapsed state once
+      // Initialize collapsed state once: all categories collapsed
       if (!catInitialized.current && rebuilt.length > 0) {
         catInitialized.current = true;
-        const toCollapse = new Set(rebuilt.filter((c) => !c.name.toLowerCase().includes('drank')).map((c) => c.id));
-        setCollapsedCategories(toCollapse);
+        setCollapsedCategories(new Set(rebuilt.map((c) => c.id)));
       }
     }
 
@@ -749,15 +748,14 @@ export default function TafelPage() {
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
         {categories.map((cat) => {
           const isDrankcat = cat.name.toLowerCase().includes('drank');
-          const isCollapsed = !isDrankcat && collapsedCategories.has(cat.id);
+          const isCollapsed = collapsedCategories.has(cat.id);
           const itemsInCart = cat.items.reduce((n, item) => n + getItemCount(item), 0);
           return (
             <section key={cat.id}>
               <button
                 type="button"
-                disabled={isDrankcat}
-                onClick={() => !isDrankcat && toggleCategory(cat.id)}
-                className={`w-full flex justify-between items-center text-left pb-1 border-b-2 mb-3 ${isDrankcat ? 'cursor-default' : 'cursor-pointer'}`}
+                onClick={() => toggleCategory(cat.id)}
+                className="w-full flex justify-between items-center text-left pb-1 border-b-2 mb-3 cursor-pointer"
                 style={{ borderColor: accent + '60' }}
               >
                 <h2 className={`text-lg font-bold ${textMain}`}>{cat.name}</h2>
@@ -767,9 +765,7 @@ export default function TafelPage() {
                       {itemsInCart}
                     </span>
                   )}
-                  {!isDrankcat && (
-                    <span className={`text-sm ${textSub} transition-transform ${isCollapsed ? '' : 'rotate-180'}`}>▼</span>
-                  )}
+                  <span className={`text-sm ${textSub} transition-transform ${isCollapsed ? '' : 'rotate-180'}`}>▼</span>
                 </div>
               </button>
               {!isCollapsed && (

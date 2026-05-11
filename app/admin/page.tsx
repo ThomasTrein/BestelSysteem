@@ -50,8 +50,8 @@ export default function AdminPage() {
         <p className="text-gray-400 text-center mb-6">Beheerpaneel voor KSA Bestelapp</p>
         <form onSubmit={handleLogin} className="space-y-4">
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Admin wachtwoord" className={inp + ' w-full'} autoFocus />
-          <div className="min-h-[1.25rem]">{loginError && <p className="text-red-400 text-sm">{loginError}</p>}</div>
-          <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors">Inloggen</button>
+          {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+          <button type="submit" className="w-full bg-[var(--accent)] hover:brightness-90 text-white font-bold py-3 rounded-lg transition-all">Inloggen</button>
         </form>
       </div>
     </div>
@@ -81,7 +81,7 @@ export default function AdminPage() {
         <div className="flex flex-wrap gap-2 mb-6">
           {tabs.map((tab) => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className={`py-2 px-4 rounded-lg font-semibold transition-colors text-sm ${activeTab === tab.key ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'}`}>
+              className={`py-2 px-4 rounded-lg font-semibold transition-colors text-sm ${activeTab === tab.key ? 'bg-[var(--accent)] text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'}`}>
               {tab.label}
             </button>
           ))}
@@ -241,7 +241,7 @@ function EvenementenTab() {
                   if (v && !newDrankkaartMethods.includes(v)) setNewDrankkaartMethods((p) => [...p, v]);
                   setNewDrankkaartMethod('');
                 }}
-                className="bg-green-700 hover:bg-green-600 text-white px-3 rounded-lg text-sm font-semibold"
+                className="bg-[var(--accent)] hover:brightness-90 text-white px-3 rounded-lg text-sm font-semibold"
               >+</button>
             </div>
             <div className="flex flex-wrap gap-1 mt-1">
@@ -274,7 +274,7 @@ function EvenementenTab() {
               </div>
             )}
           </div>
-          <button type="submit" disabled={copyingMenu} className="sm:col-span-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+          <button type="submit" disabled={copyingMenu} className="sm:col-span-2 bg-[var(--accent)] hover:brightness-90 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
             {copyingMenu ? '⏳ Menu kopiëren...' : 'Aanmaken'}
           </button>
         </form>
@@ -307,7 +307,7 @@ function EvenementenTab() {
                     Deactiveren
                   </button>
                 ) : (
-                  <button onClick={() => activateEvent(ev.id)} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-1.5 px-4 rounded-lg text-sm transition-colors">
+                  <button onClick={() => activateEvent(ev.id)} className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-1.5 px-4 rounded-lg text-sm transition-colors">
                     Activeren
                   </button>
                 )}
@@ -377,7 +377,7 @@ function EventPaymentMethods({ ev, updateEventField }: { ev: Event; updateEventF
           placeholder="Bv. Cash..."
           className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs focus:outline-none flex-1"
         />
-        <button type="button" onClick={addMethod} className="bg-green-700 hover:bg-green-600 text-white px-2 rounded text-xs font-bold">+</button>
+        <button type="button" onClick={addMethod} className="bg-[var(--accent)] hover:brightness-90 text-white px-2 rounded text-xs font-bold">+</button>
       </div>
       <div className="flex flex-wrap gap-1">
         {methods.map((m) => (
@@ -563,7 +563,7 @@ function MenuTab() {
             <h2 className="text-base font-bold mb-3 text-white">Categorie toevoegen</h2>
             <form onSubmit={addCategory} className="flex gap-3">
               <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Naam categorie" className={inp + ' flex-1'} />
-              <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">Toevoegen</button>
+              <button type="submit" className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">Toevoegen</button>
             </form>
           </div>
 
@@ -821,7 +821,7 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
               <input type="checkbox" checked={newItem.available} onChange={(e) => onNewItemChange('available', e.target.checked)} className="rounded" />
               Beschikbaar
             </label>
-            <button onClick={onAddItem} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-1.5 px-4 rounded-lg text-sm transition-colors">
+            <button onClick={onAddItem} className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-1.5 px-4 rounded-lg text-sm transition-colors">
               + Toevoegen
             </button>
           </div>
@@ -930,7 +930,6 @@ function TafelsTab() {
       pages.push(`
         <div class="page">
           ${halfHtml(tableA)}
-          <div class="cut-line"></div>
           ${tableB ? halfHtml(tableB) : '<div class="half"></div>'}
         </div>`);
     }
@@ -947,23 +946,18 @@ function TafelsTab() {
     width: 297mm;
     height: 210mm;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     page-break-after: always;
   }
   .page:last-child { page-break-after: auto; }
   .half {
-    width: 297mm;
-    height: 105mm;
+    width: 148.5mm;
+    height: 210mm;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-  }
-  .cut-line {
-    width: 100%;
-    border-top: 2px dashed #aaa;
-    flex-shrink: 0;
   }
   .table-name { margin-top: 14px; font-size: 28px; font-weight: bold; color: #111; }
   .label { margin-top: 6px; font-size: 18px; color: #555; }
@@ -991,7 +985,7 @@ function TafelsTab() {
             <h2 className="text-base font-bold mb-3 text-white">Tafel toevoegen</h2>
             <form onSubmit={addTable} className="flex gap-3">
               <input value={newTableName} onChange={(e) => setNewTableName(e.target.value)} placeholder="Tafelnaam of -nummer" className={inp + ' flex-1'} />
-              <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">Toevoegen</button>
+              <button type="submit" className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">Toevoegen</button>
             </form>
           </div>
 
@@ -1023,6 +1017,9 @@ function TafelsTab() {
                   </div>
                   <p className="text-xs text-gray-500 mb-4 break-all font-mono">{url}</p>
                   <div className="flex gap-2 justify-center">
+                    <button onClick={() => window.open(url, '_blank')} className="bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors">
+                      🔗 Open
+                    </button>
                     <button onClick={() => downloadSingleQR(table)} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors">
                       ⬇️ Download
                     </button>
@@ -1062,6 +1059,8 @@ function BestellingenTab() {
   const [filter, setFilter] = useState<'alle' | 'besteld' | 'klaar'>('alle');
   const [nameFilter, setNameFilter] = useState('');
   const [tableFilter, setTableFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [eventCategories, setEventCategories] = useState<string[]>([]);
   const [editOrder, setEditOrder] = useState<Order | null>(null);
   const [editNote, setEditNote] = useState('');
   const [editStatus, setEditStatus] = useState<'besteld' | 'klaar'>('besteld');
@@ -1100,12 +1099,17 @@ function BestellingenTab() {
   useEffect(() => {
     const ev = events.find((e) => e.id === selectedEventId) || null;
     setSelectedEvent(ev);
+    setCategoryFilter('');
     if (selectedEventId) {
       getDocs(query(collection(db, 'events', selectedEventId, 'screens'), orderBy('createdAt'))).then((snap) => {
         setScreens(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
       }).catch(() => setScreens([]));
+      getDocs(query(collection(db, 'events', selectedEventId, 'categories'), orderBy('order'))).then((snap) => {
+        setEventCategories(snap.docs.map((d) => (d.data() as MenuCategory).name).filter(Boolean));
+      }).catch(() => setEventCategories([]));
     } else {
       setScreens([]);
+      setEventCategories([]);
     }
   }, [selectedEventId, events]);
 
@@ -1197,8 +1201,11 @@ function BestellingenTab() {
     const search = nameFilter.trim().toLowerCase();
     if (search) {
       const inName = o.customerName?.toLowerCase().includes(search) ?? false;
-      const inTable = o.tableName?.toLowerCase().includes(search) ?? false;
-      if (!inName && !inTable) return false;
+      if (!inName) return false;
+    }
+    if (categoryFilter) {
+      const hasCategory = o.items.some((item) => item.categoryName === categoryFilter);
+      if (!hasCategory) return false;
     }
     return true;
   });
@@ -1273,7 +1280,7 @@ function BestellingenTab() {
                                 {group.choices.map((choice) => {
                                   const isSel = (addItemOptions[group.id] || []).includes(choice.name);
                                   return (
-                                    <button key={choice.id} onClick={() => setAddItemOptions((prev) => { const cur = prev[group.id] || []; if (group.type === 'single') return { ...prev, [group.id]: [choice.name] }; return { ...prev, [group.id]: cur.includes(choice.name) ? cur.filter((c) => c !== choice.name) : [...cur, choice.name] }; })} className={`text-xs px-2 py-1 rounded-full border transition-colors ${isSel ? 'bg-green-600 text-white border-green-500' : 'bg-gray-700 text-gray-300 border-gray-600 hover:border-gray-500'}`}>{choice.name}</button>
+                                    <button key={choice.id} onClick={() => setAddItemOptions((prev) => { const cur = prev[group.id] || []; if (group.type === 'single') return { ...prev, [group.id]: [choice.name] }; return { ...prev, [group.id]: cur.includes(choice.name) ? cur.filter((c) => c !== choice.name) : [...cur, choice.name] }; })} className={`text-xs px-2 py-1 rounded-full border transition-colors ${isSel ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-gray-700 text-gray-300 border-gray-600 hover:border-gray-500'}`}>{choice.name}</button>
                                   );
                                 })}
                               </div>
@@ -1296,7 +1303,7 @@ function BestellingenTab() {
                           setAddItemSelected(null);
                           setAddItemOptions({});
                         }}
-                        className="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold py-1.5 rounded-lg transition-colors"
+                        className="w-full bg-[var(--accent)] hover:brightness-90 text-white text-sm font-semibold py-1.5 rounded-lg transition-colors"
                       >
                         + Toevoegen
                       </button>
@@ -1333,7 +1340,7 @@ function BestellingenTab() {
               <button onClick={() => setEditOrder(null)} className="flex-1 py-2 rounded-lg border border-gray-600 text-gray-400 hover:bg-gray-700 text-sm font-semibold transition-colors">
                 Annuleren
               </button>
-              <button onClick={saveEditOrder} className="flex-1 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors">
+              <button onClick={saveEditOrder} className="flex-1 py-2 rounded-lg bg-[var(--accent)] hover:brightness-90 text-white text-sm font-semibold transition-colors">
                 Opslaan
               </button>
             </div>
@@ -1358,28 +1365,46 @@ function BestellingenTab() {
 
       {selectedEventId && (
         <>
-          <div className="flex flex-wrap gap-3 items-center">
-            <div className="flex gap-2">
+          <div className={card + ' space-y-3'}>
+            <div className="flex gap-2 flex-wrap">
               {(['alle', 'besteld', 'klaar'] as const).map((f) => (
-                <button key={f} onClick={() => setFilter(f)} className={`py-1.5 px-4 rounded-lg text-sm font-semibold transition-colors capitalize ${filter === f ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700'}`}>
+                <button key={f} onClick={() => setFilter(f)} className={`py-1.5 px-4 rounded-lg text-sm font-semibold transition-colors ${filter === f ? 'bg-[var(--accent)] text-white' : 'bg-gray-700 text-gray-400 border border-gray-600 hover:bg-gray-600'}`}>
                   {f === 'alle' ? 'Alle' : f === 'besteld' ? 'Besteld' : 'Klaar'}
                 </button>
               ))}
             </div>
-            <input
-              value={nameFilter}
-              onChange={(e) => setNameFilter(e.target.value)}
-              placeholder="🔍 Zoek op naam..."
-              className={inp + ' flex-1 min-w-[160px]'}
-            />
-            <select
-              value={tableFilter}
-              onChange={(e) => setTableFilter(e.target.value)}
-              className={inp}
-            >
-              <option value="">Alle tafels</option>
-              {tableNames.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                value={nameFilter}
+                onChange={(e) => setNameFilter(e.target.value)}
+                placeholder="🔍 Naam besteller..."
+                className={inp + ' w-full'}
+              />
+              <select
+                value={tableFilter}
+                onChange={(e) => setTableFilter(e.target.value)}
+                className={inp + ' w-full'}
+              >
+                <option value="">Alle tafels</option>
+                {tableNames.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className={inp + ' w-full'}
+              >
+                <option value="">Alle categorieën</option>
+                {eventCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            {(nameFilter || tableFilter || categoryFilter || filter !== 'alle') && (
+              <button
+                onClick={() => { setNameFilter(''); setTableFilter(''); setCategoryFilter(''); setFilter('alle'); }}
+                className="text-xs text-gray-400 hover:text-white transition-colors"
+              >
+                ✕ Filters wissen ({filtered.length} resultaten)
+              </button>
+            )}
           </div>
 
           {loading ? <Spinner /> : (
@@ -1467,7 +1492,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 function Spinner() {
   return (
     <div className="flex justify-center py-8">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--accent)]"></div>
     </div>
   );
 }
@@ -1476,64 +1501,155 @@ function Spinner() {
 function InstellingenTab() {
   const [barPw, setBarPw] = useState('');
   const [adminPw, setAdminPw] = useState('');
-  const [adminPwConfirm, setAdminPwConfirm] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [savingBar, setSavingBar] = useState(false);
+  const [savingAdmin, setSavingAdmin] = useState(false);
+  const [barMsg, setBarMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [adminMsg, setAdminMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  async function handleSave(e: React.FormEvent) {
+  const [accentColor, setAccentColor] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_accent_color') || '#16a34a' : '#16a34a'));
+  const [appName, setAppName] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_app_name') || 'KSA Bestelapp' : 'KSA Bestelapp'));
+  const [appNameSaved, setAppNameSaved] = useState(false);
+
+  const [dangerConfirm, setDangerConfirm] = useState(false);
+  const [deletingOrders, setDeletingOrders] = useState(false);
+
+  async function handleSaveBarPw(e: React.FormEvent) {
     e.preventDefault();
-    if (!barPw.trim() && !adminPw.trim()) {
-      setMessage({ type: 'error', text: 'Vul minstens één wachtwoord in.' });
-      return;
-    }
-    if (adminPw && adminPw !== adminPwConfirm) {
-      setMessage({ type: 'error', text: 'Admin wachtwoorden komen niet overeen.' });
-      return;
-    }
-    setSaving(true);
+    if (!barPw.trim()) { setBarMsg({ type: 'error', text: 'Vul een nieuw barwachtwoord in.' }); return; }
+    setSavingBar(true);
     try {
-      const { doc: firestoreDoc, getDoc: firestoreGetDoc } = await import('firebase/firestore');
-      const { db: firestoreDb } = await import('@/lib/firebase');
-      const snap = await firestoreGetDoc(firestoreDoc(firestoreDb, 'settings', 'passwords'));
+      const snap = await (await import('firebase/firestore')).getDoc((await import('firebase/firestore')).doc((await import('@/lib/firebase')).db, 'settings', 'passwords'));
       const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string } : {};
-      const newBar = barPw.trim() || current.barPassword || '';
-      const newAdmin = adminPw.trim() || current.adminPassword || '';
-      await updatePasswords(newBar, newAdmin);
-      setMessage({ type: 'success', text: 'Wachtwoorden opgeslagen!' });
-      setBarPw(''); setAdminPw(''); setAdminPwConfirm('');
-    } catch {
-      setMessage({ type: 'error', text: 'Fout bij opslaan. Probeer opnieuw.' });
-    } finally {
-      setSaving(false);
-    }
+      await updatePasswords(barPw.trim(), current.adminPassword || '');
+      setBarMsg({ type: 'success', text: 'Barwachtwoord opgeslagen!' });
+      setBarPw('');
+    } catch { setBarMsg({ type: 'error', text: 'Fout bij opslaan.' }); }
+    finally { setSavingBar(false); }
+  }
+
+  async function handleSaveAdminPw(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminPw.trim()) { setAdminMsg({ type: 'error', text: 'Vul een nieuw adminwachtwoord in.' }); return; }
+    setSavingAdmin(true);
+    try {
+      const snap = await (await import('firebase/firestore')).getDoc((await import('firebase/firestore')).doc((await import('@/lib/firebase')).db, 'settings', 'passwords'));
+      const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string } : {};
+      await updatePasswords(current.barPassword || '', adminPw.trim());
+      setAdminMsg({ type: 'success', text: 'Adminwachtwoord opgeslagen!' });
+      setAdminPw('');
+    } catch { setAdminMsg({ type: 'error', text: 'Fout bij opslaan.' }); }
+    finally { setSavingAdmin(false); }
+  }
+
+  function handleAccentChange(color: string) {
+    setAccentColor(color);
+    localStorage.setItem('ksa_accent_color', color);
+    document.documentElement.style.setProperty('--accent', color);
+  }
+
+  function handleAppNameSave() {
+    localStorage.setItem('ksa_app_name', appName.trim() || 'KSA Bestelapp');
+    setAppNameSaved(true);
+    setTimeout(() => setAppNameSaved(false), 2000);
+  }
+
+  async function handleDeleteAllOrders() {
+    setDeletingOrders(true);
+    try {
+      const { collection: col, getDocs: gd, query: q, where: wh, writeBatch: wb, doc: d } = await import('firebase/firestore');
+      const { db: fdb } = await import('@/lib/firebase');
+      const evSnap = await gd(q(col(fdb, 'events'), wh('active', '==', true)));
+      if (evSnap.empty) return;
+      const evId = evSnap.docs[0].id;
+      const ordersSnap = await gd(col(fdb, 'events', evId, 'orders'));
+      const batch = wb(fdb);
+      ordersSnap.docs.forEach((dd) => batch.delete(d(fdb, 'events', evId, 'orders', dd.id)));
+      await batch.commit();
+      setDangerConfirm(false);
+    } catch { /* ignore */ }
+    finally { setDeletingOrders(false); }
   }
 
   return (
-    <div className="space-y-6 max-w-md">
+    <div className="space-y-6 max-w-2xl">
+
+      {/* Wachtwoorden */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className={card}>
+          <h2 className="text-base font-bold text-white mb-3">🍺 Barwachtwoord</h2>
+          <form onSubmit={handleSaveBarPw} className="space-y-3">
+            <input type="password" value={barPw} onChange={(e) => setBarPw(e.target.value)} placeholder="Nieuw barwachtwoord" className={inp + ' w-full'} />
+            {barMsg && <p className={`text-xs font-medium ${barMsg.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{barMsg.text}</p>}
+            <button type="submit" disabled={savingBar} className="w-full bg-[var(--accent)] hover:brightness-90 disabled:opacity-50 text-white font-bold py-2 rounded-lg transition-all text-sm">
+              {savingBar ? 'Opslaan...' : 'Opslaan'}
+            </button>
+          </form>
+        </div>
+        <div className={card}>
+          <h2 className="text-base font-bold text-white mb-3">⚙️ Adminwachtwoord</h2>
+          <form onSubmit={handleSaveAdminPw} className="space-y-3">
+            <input type="password" value={adminPw} onChange={(e) => setAdminPw(e.target.value)} placeholder="Nieuw adminwachtwoord" className={inp + ' w-full'} />
+            {adminMsg && <p className={`text-xs font-medium ${adminMsg.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{adminMsg.text}</p>}
+            <button type="submit" disabled={savingAdmin} className="w-full bg-[var(--accent)] hover:brightness-90 disabled:opacity-50 text-white font-bold py-2 rounded-lg transition-all text-sm">
+              {savingAdmin ? 'Opslaan...' : 'Opslaan'}
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* Weergave */}
       <div className={card}>
-        <h2 className="text-lg font-bold text-white mb-4">🔑 Wachtwoorden wijzigen</h2>
-        <form onSubmit={handleSave} className="space-y-4">
+        <h2 className="text-base font-bold text-white mb-4">🎨 Weergave-instellingen</h2>
+        <div className="space-y-4">
           <div>
-            <label className="text-gray-400 text-xs mb-1 block">Nieuw barwachtwoord</label>
-            <input type="password" value={barPw} onChange={(e) => setBarPw(e.target.value)} placeholder="Leeg laten om niet te wijzigen" className={inp + ' w-full'} />
+            <label className="text-gray-400 text-xs mb-2 block">Accentkleur (actieknoppen &amp; spinners)</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={accentColor}
+                onChange={(e) => handleAccentChange(e.target.value)}
+                className="w-12 h-10 rounded-lg border border-gray-600 bg-gray-700 cursor-pointer p-1"
+              />
+              <span className="text-gray-300 text-sm font-mono">{accentColor}</span>
+              <button onClick={() => handleAccentChange('#16a34a')} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Reset</button>
+            </div>
           </div>
           <div>
-            <label className="text-gray-400 text-xs mb-1 block">Nieuw adminwachtwoord</label>
-            <input type="password" value={adminPw} onChange={(e) => setAdminPw(e.target.value)} placeholder="Leeg laten om niet te wijzigen" className={inp + ' w-full'} />
+            <label className="text-gray-400 text-xs mb-1 block">App naam (lokale opslag)</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={appName}
+                onChange={(e) => setAppName(e.target.value)}
+                className={inp + ' flex-1'}
+                placeholder="KSA Bestelapp"
+              />
+              <button onClick={handleAppNameSave} className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-all">
+                {appNameSaved ? '✓' : 'Opslaan'}
+              </button>
+            </div>
           </div>
-          <div>
-            <label className="text-gray-400 text-xs mb-1 block">Bevestig adminwachtwoord</label>
-            <input type="password" value={adminPwConfirm} onChange={(e) => setAdminPwConfirm(e.target.value)} placeholder="Herhaal adminwachtwoord" className={inp + ' w-full'} />
-          </div>
-          {message && (
-            <p className={`text-sm font-medium ${message.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
-              {message.text}
-            </p>
-          )}
-          <button type="submit" disabled={saving} className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition-colors">
-            {saving ? 'Opslaan...' : 'Wachtwoorden opslaan'}
+        </div>
+      </div>
+
+      {/* Danger zone */}
+      <div className={card + ' border-red-500/30'}>
+        <h2 className="text-base font-bold text-red-400 mb-2">⚠️ Gevarenzone</h2>
+        <p className="text-gray-400 text-sm mb-3">Verwijder alle bestellingen van het actieve evenement. Dit kan niet ongedaan worden gemaakt.</p>
+        {!dangerConfirm ? (
+          <button onClick={() => setDangerConfirm(true)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-semibold py-2 px-4 rounded-lg text-sm transition-colors">
+            🗑️ Alle bestellingen verwijderen
           </button>
-        </form>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={handleDeleteAllOrders} disabled={deletingOrders} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-2 px-4 rounded-lg text-sm transition-colors">
+              {deletingOrders ? 'Bezig...' : 'Ja, verwijder alles'}
+            </button>
+            <button onClick={() => setDangerConfirm(false)} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-2 px-4 rounded-lg text-sm transition-colors">
+              Annuleren
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1855,7 +1971,7 @@ function SchermenTab() {
                 </div>
               )}
               <div className="flex gap-3">
-                <button type="submit" disabled={!newName.trim()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm">
+                <button type="submit" disabled={!newName.trim()} className="bg-[var(--accent)] hover:brightness-90 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm">
                   {editingScreen ? 'Opslaan' : '+ Scherm aanmaken'}
                 </button>
                 {editingScreen && (
