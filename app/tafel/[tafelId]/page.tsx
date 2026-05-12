@@ -127,10 +127,10 @@ export default function TafelPage() {
         })
         .filter(Boolean) as CategoryWithItems[];
       setCategories(rebuilt);
-      // Initialize collapsed state once: all categories collapsed
+      // Initialize collapsed state once: all categories expanded
       if (!catInitialized.current && rebuilt.length > 0) {
         catInitialized.current = true;
-        setCollapsedCategories(new Set(rebuilt.map((c) => c.id)));
+        setCollapsedCategories(new Set());
       }
     }
 

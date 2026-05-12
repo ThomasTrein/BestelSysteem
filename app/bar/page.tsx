@@ -36,22 +36,24 @@ export default function BarPage() {
 
   useEffect(() => {
     if (!authed) return;
-    let unsub: (() => void) | undefined;
+    let unsubOrders: (() => void) | undefined;
+    let unsubScreens: (() => void) | undefined;
     async function setup() {
       setLoading(true);
       const snap = await getDocs(query(collection(db, 'events'), where('active', '==', true)));
       if (snap.empty) { setLoading(false); return; }
       const ev = { id: snap.docs[0].id, ...snap.docs[0].data() } as Event;
       setEvent(ev);
-      const screensSnap = await getDocs(collection(db, 'events', ev.id, 'screens'));
-      setAllScreens(screensSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
-      unsub = onSnapshot(
+      unsubScreens = onSnapshot(collection(db, 'events', ev.id, 'screens'), (s) => {
+        setAllScreens(s.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
+      });
+      unsubOrders = onSnapshot(
         query(collection(db, 'events', ev.id, 'orders'), orderBy('createdAt', 'asc')),
         (s) => { setOrders(s.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)); setLoading(false); }
       );
     }
     setup();
-    return () => { if (unsub) unsub(); };
+    return () => { if (unsubOrders) unsubOrders(); if (unsubScreens) unsubScreens(); };
   }, [authed]);
 
   async function handleLogin(e: React.FormEvent) {
@@ -68,11 +70,30 @@ export default function BarPage() {
     const current = order.itemStatuses?.[String(itemIndex)] ?? false;
     const newVal = !current;
     const newItemStatuses = { ...(order.itemStatuses || {}), [String(itemIndex)]: newVal };
-    const allDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
+    const allItemsDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
+    const drankkaartDone = order.drankkaartDone ?? (order.drankkaarten === 0);
+    const allDone = allItemsDone && drankkaartDone;
     const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     const updates: Record<string, unknown> = { [`itemStatuses.${itemIndex}`]: newVal };
     if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
     else if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+    await updateDoc(orderRef, updates);
+  }
+
+  async function handleMarkOrderDone(order: Order) {
+    if (!event) return;
+    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
+    const updates: Record<string, unknown> = {
+      status: 'klaar',
+      completedAt: serverTimestamp(),
+      drankkaartDone: true,
+    };
+    for (const s of allScreens) {
+      updates[`screenStatuses.${s.id}`] = true;
+    }
+    for (let i = 0; i < order.items.length; i++) {
+      updates[`itemStatuses.${i}`] = true;
+    }
     await updateDoc(orderRef, updates);
   }
 
@@ -166,7 +187,7 @@ export default function BarPage() {
           {besteld.length > 0 && (
             <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4 mb-6`}>
               {besteld.map((o) => (
-                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} />
+                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={() => handleMarkOrderDone(o)} />
               ))}
             </div>
           )}
@@ -183,7 +204,7 @@ export default function BarPage() {
               ) : (
                 <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4`}>
                   {klaar.map((o) => (
-                    <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} />
+                    <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={undefined} />
                   ))}
                 </div>
               )}
@@ -213,12 +234,13 @@ function formatDuration(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function OrderCard({ order, fmt, allScreens, now, onToggleItem }: {
+function OrderCard({ order, fmt, allScreens, now, onToggleItem, onMarkDone }: {
   order: Order;
   fmt: (t: unknown) => string;
   allScreens: BarScreen[];
   now: number;
   onToggleItem: (itemIndex: number) => void;
+  onMarkDone?: () => void;
 }) {
   const isDone = order.status === 'klaar';
   const totalVakjes = order.items.reduce((sum, i) => sum + (i.slots || 0) * i.quantity, 0);
@@ -248,9 +270,15 @@ function OrderCard({ order, fmt, allScreens, now, onToggleItem }: {
           <p className="text-gray-500 text-sm">{fmt(order.createdAt)}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${isDone ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
-            {isDone ? '✓ Klaar' : '⏳ Wacht'}
-          </span>
+          {!isDone && onMarkDone ? (
+            <button onClick={onMarkDone} className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-2 px-4 rounded-lg transition-all text-sm">
+              ✓ Klaar
+            </button>
+          ) : (
+            <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${isDone ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+              {isDone ? '✓ Klaar' : '⏳ Wacht'}
+            </span>
+          )}
           {elapsedMs !== null && (
             <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${isDone ? 'text-green-400' : 'text-yellow-400'}`}>
               ⏱ {formatDuration(elapsedMs)}
@@ -314,10 +342,11 @@ function OrderCard({ order, fmt, allScreens, now, onToggleItem }: {
         ))}
 
         {order.drankkaarten > 0 && (
-          <div className="bg-yellow-400/10 border border-yellow-400/20 rounded-lg px-3 py-2">
-            <p className="text-yellow-400 font-semibold">
+          <div className={`border rounded-lg px-3 py-2 ${order.drankkaartDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-yellow-400/10 border-yellow-400/20'}`}>
+            <p className={`font-semibold ${order.drankkaartDone ? 'line-through text-gray-400' : 'text-yellow-400'}`}>
               🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}
-              {order.drankkaartPaymentMethod && (
+              {order.drankkaartDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+              {order.drankkaartPaymentMethod && !order.drankkaartDone && (
                 <span className="ml-2 text-sm font-normal bg-yellow-400/20 px-2 py-0.5 rounded-full">
                   💳 {order.drankkaartPaymentMethod}
                 </span>

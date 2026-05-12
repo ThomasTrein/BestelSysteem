@@ -64,6 +64,7 @@ export interface Order {
   screenCompletedAt?: Record<string, any>; // per-screen completion timestamps: screenId → Timestamp
   itemStatuses?: Record<string, boolean>; // per-item done tracking: itemIndex → isDone
   drankkaartPaymentMethod?: string;
+  drankkaartDone?: boolean; // whether drankkaarten have been handled
 }
 
 export interface Event {
@@ -87,4 +88,5 @@ export interface BarScreen {
   categoryIds: string[]; // show all items from these categories
   itemIds: string[];     // show only specific items (by itemId) — empty = show full category
   canMarkDone?: boolean; // whether this screen can mark orders as done (default: true)
+  hasDrankkaarten?: boolean; // whether this screen handles drankkaarten
 }

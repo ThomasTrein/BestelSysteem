@@ -107,6 +107,7 @@ export default function SchermPage() {
   }
 
   function orderMatchesThisScreen(order: Order): boolean {
+    if (screen?.hasDrankkaarten && order.drankkaarten > 0) return true;
     return order.items.some(itemMatchesThisScreen);
   }
 
@@ -126,9 +127,32 @@ export default function SchermPage() {
     if (!event) return;
     const newStatuses = { ...(order.screenStatuses || {}), [schermId]: true };
 
+    // Mark all items matching this screen as done in itemStatuses
+    const itemUpdates: Record<string, unknown> = {};
+    order.items.forEach((item, i) => {
+      if (itemMatchesThisScreen(item)) {
+        itemUpdates[`itemStatuses.${i}`] = true;
+      }
+    });
+
+    // Mark drankkaarten as done if this screen handles them
+    const drankkaartUpdate: Record<string, unknown> = {};
+    if (screen?.hasDrankkaarten && order.drankkaarten > 0) {
+      drankkaartUpdate.drankkaartDone = true;
+    }
+
+    const newItemStatuses = { ...(order.itemStatuses || {}) };
+    order.items.forEach((item, i) => {
+      if (itemMatchesThisScreen(item)) newItemStatuses[String(i)] = true;
+    });
+    const drankkaartDone = (drankkaartUpdate.drankkaartDone as boolean | undefined) ?? (order.drankkaartDone ?? (order.drankkaarten === 0));
+
     const allDone = allScreens.every((s) => {
-      if (!orderHasItemsForScreen(order, s)) return true;
-      return newStatuses[s.id] === true;
+      if (s.hasDrankkaarten && order.drankkaarten > 0) {
+        if (!drankkaartDone && s.id !== schermId) return false;
+      }
+      if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || order.drankkaarten === 0 || drankkaartDone;
+      return s.id === schermId ? true : newStatuses[s.id] === true;
     });
 
     const batch = writeBatch(db);
@@ -136,6 +160,8 @@ export default function SchermPage() {
     batch.update(orderRef, {
       [`screenStatuses.${schermId}`]: true,
       [`screenCompletedAt.${schermId}`]: serverTimestamp(),
+      ...itemUpdates,
+      ...drankkaartUpdate,
       ...(allDone ? { status: 'klaar', completedAt: serverTimestamp() } : {}),
     });
     await batch.commit();
@@ -156,9 +182,24 @@ export default function SchermPage() {
     const current = order.itemStatuses?.[String(itemIndex)] ?? false;
     const newVal = !current;
     const newItemStatuses = { ...(order.itemStatuses || {}), [String(itemIndex)]: newVal };
-    const allDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
+    const allItemsDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
+    const drankkaartDone = order.drankkaartDone ?? (order.drankkaarten === 0);
+    const allDone = allItemsDone && drankkaartDone;
     const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     const updates: Record<string, unknown> = { [`itemStatuses.${itemIndex}`]: newVal };
+    if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
+    else if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+    await updateDoc(orderRef, updates);
+  }
+
+  async function toggleDrankkaartDone(order: Order) {
+    if (!event) return;
+    const current = order.drankkaartDone ?? false;
+    const newVal = !current;
+    const allItemsDone = order.items.every((_, i) => (order.itemStatuses?.[String(i)] ?? false) === true);
+    const allDone = allItemsDone && newVal;
+    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
+    const updates: Record<string, unknown> = { drankkaartDone: newVal };
     if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
     else if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
     await updateDoc(orderRef, updates);
@@ -263,8 +304,10 @@ export default function SchermPage() {
                   otherPendingScreens={getOtherPendingScreens(o)}
                   itemMatchesThisScreen={itemMatchesThisScreen}
                   canMarkDone={canMarkDone}
+                  hasDrankkaarten={screen?.hasDrankkaarten ?? false}
                   now={now}
                   onToggleItem={(idx) => toggleItemStatus(o, idx)}
+                  onToggleDrankkaart={() => toggleDrankkaartDone(o)}
                 />
               ))}
             </div>
@@ -292,8 +335,10 @@ export default function SchermPage() {
                       otherPendingScreens={getOtherPendingScreens(o)}
                       itemMatchesThisScreen={itemMatchesThisScreen}
                       canMarkDone={canMarkDone}
+                      hasDrankkaarten={screen?.hasDrankkaarten ?? false}
                       now={now}
                       onToggleItem={(idx) => toggleItemStatus(o, idx)}
+                      onToggleDrankkaart={() => toggleDrankkaartDone(o)}
                     />
                   ))}
                 </div>
@@ -333,8 +378,10 @@ function SchermOrderCard({
   otherPendingScreens,
   itemMatchesThisScreen,
   canMarkDone,
+  hasDrankkaarten,
   now,
   onToggleItem,
+  onToggleDrankkaart,
 }: {
   order: Order;
   fmt: (t: unknown) => string;
@@ -344,8 +391,10 @@ function SchermOrderCard({
   otherPendingScreens: BarScreen[];
   itemMatchesThisScreen: (item: OrderItem) => boolean;
   canMarkDone: boolean;
+  hasDrankkaarten: boolean;
   now: number;
   onToggleItem: (itemIndex: number) => void;
+  onToggleDrankkaart: () => void;
 }) {
   const myItems = order.items.filter(itemMatchesThisScreen);
   const groups = groupItemsByCategory(myItems);
@@ -364,6 +413,9 @@ function SchermOrderCard({
     if (!indexedByCategory.has(cat)) indexedByCategory.set(cat, []);
     indexedByCategory.get(cat)!.push({ item, originalIndex });
   }
+
+  const showDrankkaarten = hasDrankkaarten && order.drankkaarten > 0;
+  const drankkaartDone = order.drankkaartDone ?? false;
 
   return (
     <div className={`bg-gray-800 border border-gray-700 rounded-xl border-l-4 p-4 ${isDone ? 'border-l-green-500 opacity-70' : 'border-l-red-500'}`}>
@@ -410,6 +462,33 @@ function SchermOrderCard({
             <div className="space-y-1">
               {(indexedByCategory.get(group.category) || []).map(({ item, originalIndex }) => {
                 const itemDone = order.itemStatuses?.[String(originalIndex)] ?? false;
+                if (!canMarkDone) {
+                  return (
+                    <div
+                      key={originalIndex}
+                      className={`w-full rounded-lg px-3 py-2 border ${itemDone ? 'bg-[var(--accent)]/20 border-[var(--accent)]/40 opacity-60' : 'bg-[var(--accent)]/10 border-[var(--accent)]/30'}`}
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className={`text-base leading-tight ${itemDone ? 'line-through text-gray-400' : 'text-gray-100'}`}>
+                          <span className={`font-bold text-lg ${itemDone ? 'text-gray-400' : 'text-white'}`}>{item.quantity}×</span> {item.name}
+                          {itemDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+                        </p>
+                        <span className="text-gray-500 text-xs shrink-0">{(item.slots || 0) * item.quantity}vk</span>
+                      </div>
+                      {item.selectedOptions && item.selectedOptions.length > 0 && (
+                        <div className="mt-1 space-y-0.5">
+                          {item.selectedOptions.map((opt, oi) => (
+                            opt.selected.length > 0 && (
+                              <p key={oi} className="text-gray-400 text-sm">
+                                <span className="text-gray-500">{opt.groupName}:</span> {opt.selected.join(', ')}
+                              </p>
+                            )
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
                 return (
                   <button
                     key={originalIndex}
@@ -441,6 +520,38 @@ function SchermOrderCard({
             </div>
           </div>
         ))}
+
+        {showDrankkaarten && (
+          canMarkDone ? (
+            <button
+              type="button"
+              onClick={onToggleDrankkaart}
+              className={`w-full text-left rounded-lg px-3 py-2 border transition-colors cursor-pointer ${drankkaartDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-yellow-400/10 border-yellow-400/20 hover:bg-yellow-400/20'}`}
+            >
+              <p className={`font-semibold ${drankkaartDone ? 'line-through text-gray-400' : 'text-yellow-400'}`}>
+                🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}
+                {drankkaartDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+                {order.drankkaartPaymentMethod && !drankkaartDone && (
+                  <span className="ml-2 text-sm font-normal bg-yellow-400/20 px-2 py-0.5 rounded-full">
+                    💳 {order.drankkaartPaymentMethod}
+                  </span>
+                )}
+              </p>
+            </button>
+          ) : (
+            <div className={`rounded-lg px-3 py-2 border ${drankkaartDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-yellow-400/10 border-yellow-400/20'}`}>
+              <p className={`font-semibold ${drankkaartDone ? 'line-through text-gray-400' : 'text-yellow-400'}`}>
+                🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}
+                {drankkaartDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+                {order.drankkaartPaymentMethod && !drankkaartDone && (
+                  <span className="ml-2 text-sm font-normal bg-yellow-400/20 px-2 py-0.5 rounded-full">
+                    💳 {order.drankkaartPaymentMethod}
+                  </span>
+                )}
+              </p>
+            </div>
+          )
+        )}
 
         {order.note && (
           <div className="bg-gray-700/40 rounded-lg px-3 py-2">

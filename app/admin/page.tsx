@@ -839,7 +839,11 @@ function TafelsTab() {
   const [newTableName, setNewTableName] = useState('');
   const [origin, setOrigin] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const [qrPerPage, setQrPerPage] = useState<1 | 2 | 4 | 6 | 9>(2);
+  const [qrOrientation, setQrOrientation] = useState<'portrait' | 'landscape'>('landscape');
+  const [qrSize, setQrSize] = useState<'small' | 'medium' | 'large'>('medium');
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -966,6 +970,74 @@ function TafelsTab() {
     win.document.close();
   }
 
+  async function downloadQRPdf() {
+    if (tables.length === 0 || downloadingPdf) return;
+    setDownloadingPdf(true);
+    try {
+      const { jsPDF } = await import('jspdf');
+      const event = events.find((e) => e.id === selectedEventId);
+      const label = event?.qrLabel || 'Scan om te bestellen';
+
+      // Page dimensions in mm
+      const isLandscape = qrOrientation === 'landscape';
+      const pageW = isLandscape ? 297 : 210;
+      const pageH = isLandscape ? 210 : 297;
+
+      // Grid layout
+      const cols = qrPerPage <= 2 ? qrPerPage : qrPerPage <= 4 ? 2 : qrPerPage <= 6 ? 3 : 3;
+      const rows = Math.ceil(qrPerPage / cols);
+
+      const cellW = pageW / cols;
+      const cellH = pageH / rows;
+
+      const qrSizeMm = qrSize === 'small' ? Math.min(cellW, cellH) * 0.45
+        : qrSize === 'large' ? Math.min(cellW, cellH) * 0.75
+        : Math.min(cellW, cellH) * 0.60;
+
+      const pdf = new jsPDF({ orientation: qrOrientation, unit: 'mm', format: 'a4' });
+      let pageIdx = 0;
+
+      for (let i = 0; i < tables.length; i++) {
+        const posOnPage = i % qrPerPage;
+        if (posOnPage === 0 && i > 0) {
+          pdf.addPage();
+          pageIdx++;
+        }
+
+        const col = posOnPage % cols;
+        const row = Math.floor(posOnPage / cols);
+        const cellX = col * cellW;
+        const cellY = row * cellH;
+
+        // Get QR canvas data
+        const canvas = document.getElementById(`qr-canvas-${tables[i].id}`) as HTMLCanvasElement;
+        if (canvas) {
+          const imgData = canvas.toDataURL('image/png');
+          const imgX = cellX + (cellW - qrSizeMm) / 2;
+          const imgY = cellY + (cellH - qrSizeMm) / 2 - 6;
+          pdf.addImage(imgData, 'PNG', imgX, imgY, qrSizeMm, qrSizeMm);
+
+          // Table name
+          pdf.setFontSize(14);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setTextColor(20, 20, 20);
+          pdf.text(tables[i].name, cellX + cellW / 2, imgY + qrSizeMm + 5, { align: 'center' });
+
+          // Label
+          pdf.setFontSize(10);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setTextColor(100, 100, 100);
+          pdf.text(label, cellX + cellW / 2, imgY + qrSizeMm + 10, { align: 'center' });
+        }
+      }
+
+      pdf.save('qr-codes.pdf');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
+
   const selectedEvent = events.find((e) => e.id === selectedEventId);
   const qrLabel = selectedEvent?.qrLabel || 'Scan om te bestellen';
 
@@ -990,13 +1062,39 @@ function TafelsTab() {
           </div>
 
           {tables.length > 0 && (
-            <div className="flex gap-3 flex-wrap">
-              <button onClick={downloadAllQRCodes} disabled={downloading} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm flex items-center gap-2">
-                {downloading ? '⏳ Bezig...' : '⬇️ Alle QR codes downloaden (ZIP)'}
-              </button>
-              <button onClick={printQRCodes} className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm flex items-center gap-2">
-                🖨️ Afdrukken
-              </button>
+            <div className={card + ' space-y-4'}>
+              <h2 className="text-base font-bold text-white">📥 QR codes downloaden</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-gray-400 text-xs mb-1 block">Aantal per pagina</label>
+                  <select value={qrPerPage} onChange={(e) => setQrPerPage(Number(e.target.value) as 1 | 2 | 4 | 6 | 9)} className={inp + ' w-full'}>
+                    {[1, 2, 4, 6, 9].map((n) => <option key={n} value={n}>{n} per pagina</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-gray-400 text-xs mb-1 block">Oriëntatie</label>
+                  <select value={qrOrientation} onChange={(e) => setQrOrientation(e.target.value as 'portrait' | 'landscape')} className={inp + ' w-full'}>
+                    <option value="landscape">Liggend (landscape)</option>
+                    <option value="portrait">Staand (portrait)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-gray-400 text-xs mb-1 block">QR-grootte</label>
+                  <select value={qrSize} onChange={(e) => setQrSize(e.target.value as 'small' | 'medium' | 'large')} className={inp + ' w-full'}>
+                    <option value="small">Klein</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Groot</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3 flex-wrap">
+                <button onClick={downloadAllQRCodes} disabled={downloading} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm flex items-center gap-2">
+                  {downloading ? '⏳ Bezig...' : '⬇️ Downloaden als ZIP'}
+                </button>
+                <button onClick={downloadQRPdf} disabled={downloadingPdf} className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm flex items-center gap-2">
+                  {downloadingPdf ? '⏳ Bezig...' : '📄 Downloaden als PDF'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -1819,6 +1917,7 @@ function SchermenTab() {
   const [newCategoryIds, setNewCategoryIds] = useState<string[]>([]);
   const [newItemIds, setNewItemIds] = useState<string[]>([]);
   const [newCanMarkDone, setNewCanMarkDone] = useState(true);
+  const [newHasDrankkaarten, setNewHasDrankkaarten] = useState(false);
   const [catLoading, setCatLoading] = useState(false);
   const [editingScreen, setEditingScreen] = useState<BarScreen | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
@@ -1874,6 +1973,7 @@ function SchermenTab() {
         categoryIds: newCategoryIds,
         itemIds: newItemIds,
         canMarkDone: newCanMarkDone,
+        hasDrankkaarten: newHasDrankkaarten,
       });
       setEditingScreen(null);
     } else {
@@ -1882,12 +1982,14 @@ function SchermenTab() {
         categoryIds: newCategoryIds,
         itemIds: newItemIds,
         canMarkDone: newCanMarkDone,
+        hasDrankkaarten: newHasDrankkaarten,
       });
     }
     setNewName('');
     setNewCategoryIds([]);
     setNewItemIds([]);
     setNewCanMarkDone(true);
+    setNewHasDrankkaarten(false);
   }
 
   async function deleteScreen(screenId: string) {
@@ -1904,6 +2006,7 @@ function SchermenTab() {
     setNewCategoryIds([...screen.categoryIds]);
     setNewItemIds([...screen.itemIds]);
     setNewCanMarkDone(screen.canMarkDone !== false);
+    setNewHasDrankkaarten(screen.hasDrankkaarten === true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -1913,6 +2016,7 @@ function SchermenTab() {
     setNewCategoryIds([]);
     setNewItemIds([]);
     setNewCanMarkDone(true);
+    setNewHasDrankkaarten(false);
   }
 
   function toggleCategory(catId: string) {
@@ -1980,10 +2084,16 @@ function SchermenTab() {
                   </button>
                 )}
               </div>
-              <label className="flex items-center gap-2 cursor-pointer mt-1">
-                <input type="checkbox" checked={newCanMarkDone} onChange={(e) => setNewCanMarkDone(e.target.checked)} className="rounded" />
-                <span className="text-gray-300 text-sm">Kan bestellingen als klaar markeren</span>
-              </label>
+              <div className="flex flex-col gap-2 mt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={newCanMarkDone} onChange={(e) => setNewCanMarkDone(e.target.checked)} className="rounded" />
+                  <span className="text-gray-300 text-sm">Kan bestellingen als klaar markeren</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={newHasDrankkaarten} onChange={(e) => setNewHasDrankkaarten(e.target.checked)} className="rounded" />
+                  <span className="text-gray-300 text-sm">🎫 Drankkaarten scherm (toont en beheert drankkaarten)</span>
+                </label>
+              </div>
             </form>
           </div>
 
@@ -2002,6 +2112,9 @@ function SchermenTab() {
                         <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${screen.canMarkDone !== false ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'bg-gray-700 text-gray-500 border-gray-600'}`}>
                           {screen.canMarkDone !== false ? '✓ Klaar-knop aan' : '✗ Klaar-knop uit'}
                         </span>
+                        {screen.hasDrankkaarten && (
+                          <span className="bg-yellow-400/15 text-yellow-400 border border-yellow-400/30 text-xs px-2 py-0.5 rounded-full font-medium">🎫 Drankkaarten</span>
+                        )}
                         {screen.categoryIds.map((catId) => {
                           const cat = categories.find((c) => c.id === catId);
                           return cat ? (
