@@ -9,7 +9,7 @@ import {
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
 import { Event, MenuCategory, MenuItem, Table, Order, OrderItem, OptionGroup, OptionChoice, BarScreen, SelectedOption } from '@/lib/types';
-import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords, getBlockedKassaDevices, unblockKassaDevice } from '@/lib/auth';
+import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords, getBlockedKassaDevices, unblockKassaDevice, getKassaDevicesInfo, updateKassaDeviceName, KassaDeviceInfo } from '@/lib/auth';
 import ConfirmModal from '@/components/ConfirmModal';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
@@ -80,13 +80,15 @@ export default function AdminPage() {
         </div>
       </header>
       <div className="max-w-6xl mx-auto px-4 py-6">
-        <div className="flex flex-wrap gap-2 mb-6">
+        <div className="overflow-x-auto pb-1 -mx-1 px-1">
+          <div className="flex gap-2 mb-6 min-w-max">
           {tabs.map((tab) => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className={`py-2 px-4 rounded-lg font-semibold transition-colors text-sm ${activeTab === tab.key ? 'bg-[var(--accent)] text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'}`}>
+              className={`py-2 px-4 rounded-lg font-semibold transition-colors text-sm whitespace-nowrap ${activeTab === tab.key ? 'bg-[var(--accent)] text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'}`}>
               {tab.label}
             </button>
           ))}
+          </div>
         </div>
         {activeTab === 'evenementen' && <EvenementenTab />}
         {activeTab === 'menu' && <MenuTab />}
@@ -686,6 +688,12 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
     ));
   }
 
+  function updateChoiceField(item: MenuItem, groupId: string, choiceId: string, field: keyof OptionChoice, value: string | number) {
+    saveOptionGroups(item, getOptionGroups(item).map((g) =>
+      g.id === groupId ? { ...g, choices: g.choices.map((c) => c.id === choiceId ? { ...c, [field]: value } : c) } : g
+    ));
+  }
+
   function removeChoice(item: MenuItem, groupId: string, choiceId: string) {
     saveOptionGroups(item, getOptionGroups(item).map((g) =>
       g.id === groupId ? { ...g, choices: g.choices.filter((c) => c.id !== choiceId) } : g
@@ -795,6 +803,14 @@ function CategoryCard({ cat, pricePerSlot, newItem, onNewItemChange, onAddItem, 
                                         className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 flex-1 text-xs focus:outline-none"
                                         placeholder="Keuzenaam"
                                       />
+                                      <input
+                                        type="number" min={0} step={1}
+                                        value={choice.slots ?? 0}
+                                        onChange={(e) => updateChoiceField(item, group.id, choice.id, 'slots', parseInt(e.target.value) || 0)}
+                                        className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 w-14 text-xs focus:outline-none text-center"
+                                        title="Extra vakjes voor deze keuze"
+                                      />
+                                      <span className="text-gray-500 text-xs">vk</span>
                                       <button onClick={() => removeChoice(item, group.id, choice.id)} className="text-red-400 hover:text-red-300 text-xs">✕</button>
                                     </div>
                                   ))}
@@ -846,6 +862,9 @@ function TafelsTab() {
   const [qrPerPage, setQrPerPage] = useState<1 | 2 | 4 | 6 | 9>(2);
   const [qrOrientation, setQrOrientation] = useState<'portrait' | 'landscape'>('landscape');
   const [qrSize, setQrSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [bulkPrefix, setBulkPrefix] = useState('');
+  const [bulkCount, setBulkCount] = useState(10);
+  const [bulkAdding, setBulkAdding] = useState(false);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -870,6 +889,19 @@ function TafelsTab() {
     if (!newTableName.trim() || !selectedEventId) return;
     await addDoc(collection(db, 'events', selectedEventId, 'tables'), { name: newTableName.trim() });
     setNewTableName('');
+  }
+
+  async function addBulkTables() {
+    if (!bulkPrefix.trim() || bulkCount < 1 || !selectedEventId) return;
+    setBulkAdding(true);
+    try {
+      for (let i = 1; i <= bulkCount; i++) {
+        await addDoc(collection(db, 'events', selectedEventId, 'tables'), { name: `${bulkPrefix.trim()} ${i}` });
+      }
+      setBulkPrefix('');
+    } finally {
+      setBulkAdding(false);
+    }
   }
 
   async function deleteTable(tableId: string) {
@@ -1061,6 +1093,42 @@ function TafelsTab() {
               <input value={newTableName} onChange={(e) => setNewTableName(e.target.value)} placeholder="Tafelnaam of -nummer" className={inp + ' flex-1'} />
               <button type="submit" className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">Toevoegen</button>
             </form>
+          </div>
+
+          <div className={card}>
+            <h2 className="text-base font-bold mb-3 text-white">📋 Bulk aanmaken</h2>
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-40">
+                <label className="text-gray-400 text-xs mb-1 block">Naam-prefix</label>
+                <input
+                  value={bulkPrefix}
+                  onChange={(e) => setBulkPrefix(e.target.value)}
+                  placeholder="bv. Tafel"
+                  className={inp + ' w-full'}
+                />
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs mb-1 block">Aantal</label>
+                <input
+                  type="number" min={1} max={100}
+                  value={bulkCount}
+                  onChange={(e) => setBulkCount(Math.min(100, Math.max(1, parseInt(e.target.value) || 1)))}
+                  className={inp + ' w-24 text-center'}
+                />
+              </div>
+              <button
+                onClick={addBulkTables}
+                disabled={bulkAdding || !bulkPrefix.trim() || !selectedEventId}
+                className="bg-[var(--accent)] hover:brightness-90 disabled:opacity-50 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm flex items-center gap-2"
+              >
+                {bulkAdding ? (
+                  <><span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full"></span> Bezig...</>
+                ) : 'Aanmaken'}
+              </button>
+            </div>
+            {bulkPrefix.trim() && bulkCount > 0 && (
+              <p className="text-gray-500 text-xs mt-2">Maakt {bulkCount} tafels aan: &quot;{bulkPrefix.trim()} 1&quot; t/m &quot;{bulkPrefix.trim()} {bulkCount}&quot;</p>
+            )}
           </div>
 
           {tables.length > 0 && (
@@ -1611,6 +1679,9 @@ function InstellingenTab() {
 
   const [blockedDevices, setBlockedDevices] = useState<string[]>([]);
   const [unblockingId, setUnblockingId] = useState<string | null>(null);
+  const [devicesInfo, setDevicesInfo] = useState<Record<string, KassaDeviceInfo>>({});
+  const [editingDeviceName, setEditingDeviceName] = useState<string | null>(null);
+  const [editDeviceNameVal, setEditDeviceNameVal] = useState('');
 
   const [accentColor, setAccentColor] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_accent_color') || '#16a34a' : '#16a34a'));
   const [appName, setAppName] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_app_name') || 'KSA Bestelapp' : 'KSA Bestelapp'));
@@ -1621,6 +1692,7 @@ function InstellingenTab() {
 
   useEffect(() => {
     getBlockedKassaDevices().then(setBlockedDevices);
+    getKassaDevicesInfo().then(setDevicesInfo);
   }, []);
 
   async function handleUnblock(deviceId: string) {
@@ -1631,6 +1703,15 @@ function InstellingenTab() {
     } finally {
       setUnblockingId(null);
     }
+  }
+
+  async function handleRenameDevice(deviceId: string) {
+    const name = editDeviceNameVal.trim();
+    if (!name) return;
+    await updateKassaDeviceName(deviceId, name);
+    setDevicesInfo((prev) => ({ ...prev, [deviceId]: { ...prev[deviceId], blockCount: prev[deviceId]?.blockCount || 0, name } }));
+    setEditingDeviceName(null);
+    setEditDeviceNameVal('');
   }
 
   async function handleSaveBarPw(e: React.FormEvent) {
@@ -1785,25 +1866,94 @@ function InstellingenTab() {
         </div>
       </div>
 
-      {/* Geblokkeerde kassa-toestellen */}
-      {blockedDevices.length > 0 && (
-        <div className={card + ' border-yellow-500/30'}>
-          <h2 className="text-base font-bold text-yellow-400 mb-2">🔒 Geblokkeerde kassa-toestellen</h2>
-          <p className="text-gray-400 text-sm mb-3">Deze toestellen zijn geblokkeerd na 3 mislukte inlogpogingen. Keur ze goed om ze opnieuw toegang te geven.</p>
-          <div className="space-y-2">
-            {blockedDevices.map((deviceId) => (
-              <div key={deviceId} className="flex items-center justify-between bg-gray-700/50 rounded-lg px-3 py-2">
-                <span className="text-gray-300 text-sm font-mono truncate max-w-[70%]">{deviceId}</span>
-                <button
-                  onClick={() => handleUnblock(deviceId)}
-                  disabled={unblockingId === deviceId}
-                  className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 font-semibold py-1 px-3 rounded-lg text-xs transition-colors disabled:opacity-50"
-                >
-                  {unblockingId === deviceId ? 'Bezig...' : '✓ Goedkeuren'}
-                </button>
+      {/* Kassa-toestellen */}
+      {(blockedDevices.length > 0 || Object.keys(devicesInfo).length > 0) && (
+        <div className={card + ' border-yellow-500/30 space-y-4'}>
+          <h2 className="text-base font-bold text-yellow-400">🔒 Kassa-toestellen</h2>
+
+          {blockedDevices.length > 0 && (
+            <div>
+              <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-2">Momenteel geblokkeerd</p>
+              <div className="space-y-2">
+                {blockedDevices.map((deviceId) => {
+                  const info = devicesInfo[deviceId];
+                  return (
+                    <div key={deviceId} className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                      <div>
+                        {info?.name ? (
+                          <p className="text-green-400 text-sm font-semibold">{info.name}</p>
+                        ) : null}
+                        <p className="text-gray-400 text-xs font-mono truncate max-w-[200px]">{deviceId}</p>
+                      </div>
+                      <button
+                        onClick={() => handleUnblock(deviceId)}
+                        disabled={unblockingId === deviceId}
+                        className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 font-semibold py-1 px-3 rounded-lg text-xs transition-colors disabled:opacity-50"
+                      >
+                        {unblockingId === deviceId ? 'Bezig...' : '✓ Goedkeuren'}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {Object.keys(devicesInfo).length > 0 && (
+            <div>
+              <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-2">Toestelgeschiedenis</p>
+              <div className="space-y-2">
+                {Object.entries(devicesInfo).map(([deviceId, info]) => (
+                  <div key={deviceId} className="bg-gray-700/50 rounded-lg px-3 py-2 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        {info.name ? (
+                          <p className="text-green-400 text-sm font-semibold">{info.name}</p>
+                        ) : null}
+                        <p className="text-gray-400 text-xs font-mono truncate">{deviceId}</p>
+                        <p className="text-gray-500 text-xs">
+                          {info.blockCount} keer geblokkeerd
+                          {info.lastBlockedAt && (
+                            <> · laatste: {(() => {
+                              try {
+                                const d = info.lastBlockedAt?.toDate ? info.lastBlockedAt.toDate() : new Date(info.lastBlockedAt);
+                                return d.toLocaleDateString('nl-BE') + ' ' + d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+                              } catch { return ''; }
+                            })()}</>
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => { setEditingDeviceName(deviceId); setEditDeviceNameVal(info.name || ''); }}
+                        className="text-gray-400 hover:text-white text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded transition-colors flex-shrink-0"
+                        title="Naam bewerken"
+                      >
+                        ✏️
+                      </button>
+                    </div>
+                    {editingDeviceName === deviceId && (
+                      <div className="flex gap-2 mt-1">
+                        <input
+                          value={editDeviceNameVal}
+                          onChange={(e) => setEditDeviceNameVal(e.target.value)}
+                          placeholder="Naam toestel (bv. Bar iPad)"
+                          className={inp + ' flex-1 text-xs py-1'}
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleRenameDevice(deviceId); if (e.key === 'Escape') setEditingDeviceName(null); }}
+                        />
+                        <button onClick={() => handleRenameDevice(deviceId)} className="bg-[var(--accent)] hover:brightness-90 text-white font-semibold py-1 px-3 rounded-lg text-xs transition-colors">
+                          Opslaan
+                        </button>
+                        <button onClick={() => setEditingDeviceName(null)} className="bg-gray-600 hover:bg-gray-500 text-gray-300 font-semibold py-1 px-2 rounded-lg text-xs transition-colors">
+                          ✕
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

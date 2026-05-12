@@ -68,13 +68,29 @@ export function getKassaDeviceId(): string {
 
 export async function blockKassaDevice(): Promise<void> {
   const deviceId = getOrCreateDeviceId();
+  const { Timestamp } = await import('firebase/firestore');
   try {
     const ref = doc(db, 'settings', 'kassaDevices');
     const snap = await getDoc(ref);
     if (snap.exists()) {
-      await updateDoc(ref, { blocked: arrayUnion(deviceId) });
+      const data = snap.data();
+      const deviceInfo = data.deviceInfo || {};
+      const current = deviceInfo[deviceId] || { blockCount: 0 };
+      await updateDoc(ref, {
+        blocked: arrayUnion(deviceId),
+        [`deviceInfo.${deviceId}`]: {
+          ...current,
+          blockCount: (current.blockCount || 0) + 1,
+          lastBlockedAt: Timestamp.now(),
+        },
+      });
     } else {
-      await setDoc(ref, { blocked: [deviceId] });
+      await setDoc(ref, {
+        blocked: [deviceId],
+        deviceInfo: {
+          [deviceId]: { blockCount: 1, lastBlockedAt: Timestamp.now() },
+        },
+      });
     }
   } catch {}
 }
@@ -90,6 +106,30 @@ export async function getBlockedKassaDevices(): Promise<string[]> {
     if (d.exists()) return d.data().blocked || [];
   } catch {}
   return [];
+}
+
+export interface KassaDeviceInfo {
+  name?: string;
+  blockCount: number;
+  lastBlockedAt?: any;
+}
+
+export async function getKassaDevicesInfo(): Promise<Record<string, KassaDeviceInfo>> {
+  try {
+    const d = await getDoc(doc(db, 'settings', 'kassaDevices'));
+    if (d.exists()) return d.data().deviceInfo || {};
+  } catch {}
+  return {};
+}
+
+export async function updateKassaDeviceName(deviceId: string, name: string): Promise<void> {
+  const ref = doc(db, 'settings', 'kassaDevices');
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    await updateDoc(ref, { [`deviceInfo.${deviceId}.name`]: name });
+  } else {
+    await setDoc(ref, { blocked: [], deviceInfo: { [deviceId]: { name, blockCount: 0 } } });
+  }
 }
 
 export function getKassaAttempts(): number {

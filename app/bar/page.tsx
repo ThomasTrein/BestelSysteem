@@ -173,9 +173,9 @@ export default function BarPage() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
-              <span className="text-gray-400 text-xs px-1">Kolommen:</span>
+              <span className="hidden sm:inline text-gray-400 text-xs px-1">Kolommen:</span>
               {[1, 2, 3, 4].map((n) => (
-                <button key={n} onClick={() => changeColumns(n)} className={`w-7 h-7 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-[var(--accent)] text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
+                <button key={n} onClick={() => changeColumns(n)} className={`w-9 h-9 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-[var(--accent)] text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
               ))}
             </div>
             <button
@@ -199,7 +199,7 @@ export default function BarPage() {
       ) : !event ? (
         <div className="flex items-center justify-center h-64 text-gray-500 text-xl">Geen actief evenement gevonden.</div>
       ) : (
-        <main className="px-4 py-4">
+        <main className="px-4 py-4 2xl:px-8 2xl:py-6">
           {besteld.length === 0 && !showKlaar && (
             <p className="text-gray-500 text-center py-16 text-lg">Geen nieuwe bestellingen</p>
           )}

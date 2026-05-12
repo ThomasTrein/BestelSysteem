@@ -194,6 +194,9 @@ function OptionsModal({
                         {sel && <div className={`w-2.5 h-2.5 bg-[var(--accent)] ${group.type === 'single' ? 'rounded-full' : 'rounded-sm'}`} />}
                       </div>
                       <span className="text-white font-medium">{choice.name}</span>
+                      {(choice.slots ?? 0) > 0 && (
+                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 ml-auto">+{choice.slots}vk</span>
+                      )}
                     </label>
                   );
                 })}
@@ -233,6 +236,7 @@ export default function KassaPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [mobileTab, setMobileTab] = useState<'menu' | 'cart'>('menu');
 
   useEffect(() => {
     setAuthed(checkKassaAuth());
@@ -268,6 +272,13 @@ export default function KassaPage() {
 
   function addToCart(item: MenuItem, catName: string, opts: SelectedOption[]) {
     const key = cartKey(item.id, opts);
+    const extraSlots = (item.optionGroups || []).reduce((sum, group) => {
+      const choiceNames = (opts.find((o) => o.groupId === group.id)?.selected) || [];
+      return sum + group.choices
+        .filter((c) => choiceNames.includes(c.name))
+        .reduce((s, c) => s + (c.slots || 0), 0);
+    }, 0);
+    const totalSlots = item.slots + extraSlots;
     setCart((prev) => {
       const idx = prev.findIndex((e) => e.uid === key);
       if (idx >= 0) {
@@ -280,7 +291,7 @@ export default function KassaPage() {
         itemId: item.id,
         name: item.name,
         categoryName: catName,
-        slots: item.slots,
+        slots: totalSlots,
         quantity: 1,
         selectedOptions: opts,
       }];
@@ -405,12 +416,28 @@ export default function KassaPage() {
       )}
 
       {/* Main layout: left categories + items | right cart */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+
+        {/* Mobile tab bar */}
+        <div className="md:hidden flex border-b border-gray-700 bg-gray-900 flex-shrink-0">
+          <button
+            onClick={() => setMobileTab('menu')}
+            className={`flex-1 py-3 text-sm font-semibold transition-colors ${mobileTab === 'menu' ? 'text-white border-b-2 border-[var(--accent)]' : 'text-gray-400'}`}
+          >
+            🍺 Menu
+          </button>
+          <button
+            onClick={() => setMobileTab('cart')}
+            className={`flex-1 py-3 text-sm font-semibold transition-colors ${mobileTab === 'cart' ? 'text-white border-b-2 border-[var(--accent)]' : 'text-gray-400'}`}
+          >
+            🛒 Bestelling{totalItems > 0 ? ` (${totalItems})` : ''}
+          </button>
+        </div>
 
         {/* LEFT: categories + items */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className={`flex flex-1 overflow-hidden ${mobileTab === 'cart' ? 'hidden md:flex' : 'flex'}`}>
           {/* Category list */}
-          <div className="w-36 sm:w-44 bg-gray-900 border-r border-gray-700 overflow-y-auto flex-shrink-0">
+          <div className="w-32 sm:w-44 bg-gray-900 border-r border-gray-700 overflow-y-auto flex-shrink-0">
             {categories.map((cat) => (
               <button
                 key={cat.id}
@@ -436,10 +463,10 @@ export default function KassaPage() {
                 <h2 className="text-white font-bold text-base">🎟️ Drankkaarten{drankkaartPrice > 0 ? ` — €${drankkaartPrice.toFixed(2)}/stuk` : ''}</h2>
                 <div className="flex items-center gap-4">
                   <button onClick={() => setDrankkaarten((v) => Math.max(0, v - 1))} disabled={drankkaarten === 0}
-                    className="w-10 h-10 rounded-full bg-gray-700 hover:bg-gray-600 text-white text-xl font-bold flex items-center justify-center disabled:opacity-30">−</button>
+                    className="w-11 h-11 rounded-full bg-gray-700 hover:bg-gray-600 text-white text-xl font-bold flex items-center justify-center disabled:opacity-30">−</button>
                   <span className={`text-2xl font-bold w-10 text-center ${drankkaarten > 0 ? 'text-white' : 'text-gray-500'}`}>{drankkaarten}</span>
                   <button onClick={() => setDrankkaarten((v) => v + 1)}
-                    className="w-10 h-10 rounded-full bg-[var(--accent)] hover:brightness-90 text-white text-xl font-bold flex items-center justify-center">+</button>
+                    className="w-11 h-11 rounded-full bg-[var(--accent)] hover:brightness-90 text-white text-xl font-bold flex items-center justify-center">+</button>
                 </div>
                 {drankkaarten > 0 && paymentMethods.length > 0 && (
                   <div>
@@ -447,7 +474,7 @@ export default function KassaPage() {
                     <div className="flex flex-wrap gap-2">
                       {paymentMethods.map((m) => (
                         <button key={m} onClick={() => setDrankkaartPaymentMethod(m)}
-                          className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${drankkaartPaymentMethod === m ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'}`}>
+                          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors min-h-[44px] ${drankkaartPaymentMethod === m ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'}`}>
                           {m}
                         </button>
                       ))}
@@ -458,12 +485,12 @@ export default function KassaPage() {
             ) : selectedCat ? (
               <div>
                 <h2 className="text-white font-bold text-base mb-3">{selectedCat.name}</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2">
                   {selectedCat.items.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => handleItemClick(item, selectedCat.name)}
-                      className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl p-3 text-left transition-colors active:scale-95"
+                      className="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl p-3 text-left transition-colors active:scale-95 min-h-[56px]"
                     >
                       <p className="text-white font-medium text-sm leading-tight">{item.name}</p>
                       {item.optionGroups && item.optionGroups.length > 0 && (
@@ -481,7 +508,7 @@ export default function KassaPage() {
         </div>
 
         {/* RIGHT: cart */}
-        <div className="w-64 sm:w-72 bg-gray-800 border-l border-gray-700 flex flex-col">
+        <div className={`${mobileTab === 'menu' ? 'hidden md:flex' : 'flex'} w-full md:w-64 lg:w-72 bg-gray-800 border-l border-gray-700 flex-col`}>
           <div className="p-3 border-b border-gray-700">
             <p className="text-white font-bold text-sm">Bestelling</p>
           </div>
@@ -557,7 +584,7 @@ export default function KassaPage() {
             <button
               onClick={handleSubmit}
               disabled={!canPlace || submitting}
-              className="w-full bg-[var(--accent)] hover:brightness-90 disabled:opacity-40 text-white font-bold py-3 rounded-xl transition-all text-sm"
+              className="w-full bg-[var(--accent)] hover:brightness-90 disabled:opacity-40 text-white font-bold py-3 rounded-xl transition-all text-sm min-h-[48px]"
             >
               {submitting ? 'Bezig...' : `✓ Plaatsen${totalItems > 0 ? ` (${totalItems})` : ''}`}
             </button>

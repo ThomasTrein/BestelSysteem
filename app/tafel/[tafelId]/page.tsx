@@ -287,11 +287,17 @@ export default function TafelPage() {
       type: group.type,
       selected: modalSelections[group.id] || [],
     })).filter((o) => o.selected.length > 0 || groups.find((g) => g.id === o.groupId)?.required);
+    const extraSlots = (modalItem.optionGroups || []).reduce((sum, group) => {
+      const choiceNames = modalSelections[group.id] || [];
+      return sum + group.choices
+        .filter((c) => choiceNames.includes(c.name))
+        .reduce((s, c) => s + (c.slots || 0), 0);
+    }, 0);
     const entry: OptionEntry = {
       uid: Date.now().toString() + Math.random().toString(36).slice(2),
       itemId: modalItem.id,
       name: modalItem.name,
-      slots: modalItem.slots,
+      slots: modalItem.slots + extraSlots,
       categoryId: modalCategoryId,
       categoryName: modalCategoryName,
       selectedOptions,
@@ -351,6 +357,9 @@ export default function TafelPage() {
         note,
         status: 'besteld',
         createdAt: serverTimestamp(),
+        screenStatuses: {},
+        itemStatuses: {},
+        drankkaartDone: false,
       });
       setSuccess(true);
       setShowReview(false);
@@ -536,7 +545,7 @@ export default function TafelPage() {
           </div>
         </header>
 
-        <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+        <main className="max-w-2xl lg:max-w-3xl 2xl:max-w-4xl mx-auto px-4 py-6 space-y-4">
           <div className={`${cardBg} rounded-xl shadow-sm overflow-hidden`}>
             <div className="px-4 py-3 border-b" style={{ borderColor: accent + '30' }}>
               <h2 className={`font-bold ${textMain}`}>📋 Jouw bestelling</h2>
@@ -699,6 +708,9 @@ export default function TafelPage() {
                             )}
                           </div>
                           <span className={`${textMain} font-medium`}>{choice.name}</span>
+                          {(choice.slots ?? 0) > 0 && (
+                            <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 ml-auto">+{choice.slots}vk</span>
+                          )}
                         </label>
                       );
                     })}
@@ -745,7 +757,7 @@ export default function TafelPage() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+      <main className="max-w-2xl lg:max-w-3xl 2xl:max-w-4xl mx-auto px-4 py-6 space-y-6">
         {categories.map((cat) => {
           const isDrankcat = cat.name.toLowerCase().includes('drank');
           const isCollapsed = collapsedCategories.has(cat.id);

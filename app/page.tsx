@@ -2,28 +2,28 @@ import Link from 'next/link';
 
 export default function Home() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-green-800 to-green-600 text-white p-8">
+    <main className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-green-800 to-green-600 text-white p-6 sm:p-8">
       <div className="max-w-md w-full text-center space-y-8">
         <div>
-          <h1 className="text-4xl font-bold mb-2">🍺 KSA Bestelapp</h1>
-          <p className="text-green-100 text-lg">Scan de QR-code aan je tafel om te bestellen</p>
+          <h1 className="text-4xl sm:text-5xl 2xl:text-6xl font-bold mb-2">🍺 KSA Bestelapp</h1>
+          <p className="text-green-100 text-lg 2xl:text-xl">Scan de QR-code aan je tafel om te bestellen</p>
         </div>
         <div className="grid gap-4 mt-8">
           <Link
             href="/bar"
-            className="bg-white text-green-800 font-semibold py-4 px-6 rounded-xl hover:bg-green-50 transition-colors shadow-lg"
+            className="bg-white text-green-800 font-semibold py-4 px-6 rounded-xl hover:bg-green-50 transition-colors shadow-lg text-lg min-h-[56px] flex items-center justify-center"
           >
             🍹 Barscherm
           </Link>
           <Link
             href="/kassa"
-            className="bg-green-50 text-green-800 font-semibold py-4 px-6 rounded-xl hover:bg-white transition-colors shadow-lg border border-green-300"
+            className="bg-green-50 text-green-800 font-semibold py-4 px-6 rounded-xl hover:bg-white transition-colors shadow-lg border border-green-300 text-lg min-h-[56px] flex items-center justify-center"
           >
             🏪 Kassa
           </Link>
           <Link
             href="/admin"
-            className="bg-green-700 text-white font-semibold py-4 px-6 rounded-xl hover:bg-green-600 transition-colors shadow-lg border border-green-500"
+            className="bg-green-700 text-white font-semibold py-4 px-6 rounded-xl hover:bg-green-600 transition-colors shadow-lg border border-green-500 text-lg min-h-[56px] flex items-center justify-center"
           >
             ⚙️ Admin
           </Link>

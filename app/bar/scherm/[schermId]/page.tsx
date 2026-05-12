@@ -171,10 +171,20 @@ export default function SchermPage() {
   async function undoScreenDone(order: Order) {
     if (!event) return;
     const orderRef = doc(db, 'events', event.id, 'orders', order.id);
+    // Reset itemStatuses for items that were auto-checked by markScreenDone
+    const itemResets: Record<string, unknown> = {};
+    order.items.forEach((item, i) => {
+      if (itemMatchesThisScreen(item)) {
+        itemResets[`itemStatuses.${i}`] = false;
+      }
+    });
+    const drankkaartReset = screen?.hasDrankkaarten && order.drankkaarten > 0 ? { drankkaartDone: false } : {};
     await updateDoc(orderRef, {
       [`screenStatuses.${schermId}`]: false,
       status: 'besteld',
       completedAt: null,
+      ...itemResets,
+      ...drankkaartReset,
     });
   }
 
@@ -300,9 +310,9 @@ export default function SchermPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <a href="/bar" className="text-gray-400 hover:text-white text-sm transition-colors">← Terug naar bar</a>
             <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
-              <span className="text-gray-400 text-xs px-1">Kolommen:</span>
+              <span className="hidden sm:inline text-gray-400 text-xs px-1">Kolommen:</span>
               {[1, 2, 3, 4].map((n) => (
-                <button key={n} onClick={() => changeColumns(n)} className={`w-7 h-7 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-[var(--accent)] text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
+                <button key={n} onClick={() => changeColumns(n)} className={`w-9 h-9 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-[var(--accent)] text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
               ))}
             </div>
             <button
@@ -328,7 +338,7 @@ export default function SchermPage() {
       ) : !screen ? (
         <div className="flex items-center justify-center h-64 text-gray-500 text-xl">Scherm niet gevonden.</div>
       ) : (
-        <main className="px-4 py-4">
+        <main className="px-4 py-4 2xl:px-8 2xl:py-6">
           {pending.length === 0 && !showKlaar && (
             <p className="text-gray-500 text-center py-16 text-lg">Geen nieuwe bestellingen</p>
           )}

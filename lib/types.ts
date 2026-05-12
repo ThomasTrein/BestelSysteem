@@ -1,6 +1,7 @@
 export interface OptionChoice {
   id: string;
   name: string;
+  slots?: number; // extra vakjes for this choice (default 0)
 }
 
 export interface OptionGroup {
