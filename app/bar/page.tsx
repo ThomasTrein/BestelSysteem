@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { collection, query, where, onSnapshot, getDocs, orderBy, Timestamp, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Event, Order, OrderItem, BarScreen } from '@/lib/types';
+import { Event, Order, OrderItem, MenuCategory, BarScreen } from '@/lib/types';
 import { checkBarAuth, loginBar, logoutBar } from '@/lib/auth';
 
 function getStoredColumns(): number {
@@ -12,6 +13,7 @@ function getStoredColumns(): number {
 }
 
 export default function BarPage() {
+  const router = useRouter();
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -19,6 +21,7 @@ export default function BarPage() {
   const [event, setEvent] = useState<Event | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [allScreens, setAllScreens] = useState<BarScreen[]>([]);
+  const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [columns, setColumns] = useState<number>(2);
   const [showKlaar, setShowKlaar] = useState(false);
@@ -46,6 +49,9 @@ export default function BarPage() {
       setEvent(ev);
       unsubScreens = onSnapshot(collection(db, 'events', ev.id, 'screens'), (s) => {
         setAllScreens(s.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
+      });
+      getDocs(collection(db, 'events', ev.id, 'categories')).then((s) => {
+        setCategories(s.docs.map((d) => ({ id: d.id, ...d.data() } as MenuCategory)));
       });
       unsubOrders = onSnapshot(
         query(collection(db, 'events', ev.id, 'orders'), orderBy('createdAt', 'asc')),
@@ -95,6 +101,19 @@ export default function BarPage() {
       updates[`itemStatuses.${i}`] = true;
     }
     await updateDoc(orderRef, updates);
+  }
+
+  function orderHasItemsForScreen(order: Order, s: BarScreen): boolean {
+    const catNames = new Set(
+      (s.categoryIds || []).map((catId) => categories.find((c) => c.id === catId)?.name).filter(Boolean) as string[]
+    );
+    const itemIds = new Set(s.itemIds || []);
+    if (s.hasDrankkaarten && order.drankkaarten > 0) return true;
+    return order.items.some((item) => catNames.has(item.categoryName) || itemIds.has(item.itemId));
+  }
+
+  function screensForOrder(order: Order): BarScreen[] {
+    return allScreens.filter((s) => orderHasItemsForScreen(order, s));
   }
 
   function changeColumns(n: number) {
@@ -166,7 +185,7 @@ export default function BarPage() {
               ✓ Klaar
               <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${showKlaar ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{klaar.length}</span>
             </button>
-            <button onClick={() => { logoutBar(); setAuthed(false); setOrders([]); setEvent(null); }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm">
+            <button onClick={() => { logoutBar(); router.push('/'); }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm">
               Afmelden
             </button>
           </div>
@@ -187,7 +206,7 @@ export default function BarPage() {
           {besteld.length > 0 && (
             <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4 mb-6`}>
               {besteld.map((o) => (
-                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={() => handleMarkOrderDone(o)} />
+                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={screensForOrder(o)} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={() => handleMarkOrderDone(o)} />
               ))}
             </div>
           )}
@@ -204,7 +223,7 @@ export default function BarPage() {
               ) : (
                 <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4`}>
                   {klaar.map((o) => (
-                    <OrderCard key={o.id} order={o} fmt={fmt} allScreens={allScreens} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={undefined} />
+                    <OrderCard key={o.id} order={o} fmt={fmt} allScreens={screensForOrder(o)} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={undefined} />
                   ))}
                 </div>
               )}

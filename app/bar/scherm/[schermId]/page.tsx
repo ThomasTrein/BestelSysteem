@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   collection, query, where, onSnapshot, getDocs, doc,
   updateDoc, orderBy, Timestamp, writeBatch, serverTimestamp,
@@ -17,6 +17,7 @@ function getStoredColumns(): number {
 
 export default function SchermPage() {
   const params = useParams();
+  const router = useRouter();
   const schermId = params.schermId as string;
 
   const [authed, setAuthed] = useState(false);
@@ -182,13 +183,35 @@ export default function SchermPage() {
     const current = order.itemStatuses?.[String(itemIndex)] ?? false;
     const newVal = !current;
     const newItemStatuses = { ...(order.itemStatuses || {}), [String(itemIndex)]: newVal };
-    const allItemsDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
-    const drankkaartDone = order.drankkaartDone ?? (order.drankkaarten === 0);
-    const allDone = allItemsDone && drankkaartDone;
-    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     const updates: Record<string, unknown> = { [`itemStatuses.${itemIndex}`]: newVal };
-    if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
-    else if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+
+    // Check if all items for THIS screen are now done
+    const myItemIndices = order.items.map((item, i) => ({ item, i })).filter(({ item }) => itemMatchesThisScreen(item));
+    const allMyItemsDone = myItemIndices.every(({ i }) => newItemStatuses[String(i)] === true);
+    const drankkaartHandled = !screen?.hasDrankkaarten || order.drankkaarten === 0 || (order.drankkaartDone ?? false);
+    const thisScreenNowDone = allMyItemsDone && drankkaartHandled;
+
+    if (newVal && thisScreenNowDone && order.screenStatuses?.[schermId] !== true) {
+      // Auto-mark this screen as done
+      updates[`screenStatuses.${schermId}`] = true;
+      updates[`screenCompletedAt.${schermId}`] = serverTimestamp();
+      // Check if ALL screens are now done → mark order klaar
+      const newScreenStatuses = { ...(order.screenStatuses || {}), [schermId]: true };
+      const newDrankkaartDone = order.drankkaartDone ?? (order.drankkaarten === 0);
+      const allDone = allScreens.every((s) => {
+        if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || order.drankkaarten === 0 || newDrankkaartDone;
+        return newScreenStatuses[s.id] === true;
+      }) && newDrankkaartDone;
+      if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
+    } else if (!newVal && order.screenStatuses?.[schermId] === true) {
+      // Untick: undo this screen's done status
+      updates[`screenStatuses.${schermId}`] = false;
+      if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+    } else if (order.status === 'klaar' && !thisScreenNowDone) {
+      updates.status = 'besteld'; updates.completedAt = null;
+    }
+
+    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     await updateDoc(orderRef, updates);
   }
 
@@ -196,12 +219,30 @@ export default function SchermPage() {
     if (!event) return;
     const current = order.drankkaartDone ?? false;
     const newVal = !current;
-    const allItemsDone = order.items.every((_, i) => (order.itemStatuses?.[String(i)] ?? false) === true);
-    const allDone = allItemsDone && newVal;
-    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     const updates: Record<string, unknown> = { drankkaartDone: newVal };
-    if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
-    else if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+
+    // Check if all items for THIS screen are now done
+    const myItemIndices = order.items.map((item, i) => ({ item, i })).filter(({ item }) => itemMatchesThisScreen(item));
+    const allMyItemsDone = myItemIndices.every(({ i }) => (order.itemStatuses?.[String(i)] ?? false) === true);
+    const thisScreenNowDone = allMyItemsDone && newVal;
+
+    if (newVal && thisScreenNowDone && order.screenStatuses?.[schermId] !== true) {
+      updates[`screenStatuses.${schermId}`] = true;
+      updates[`screenCompletedAt.${schermId}`] = serverTimestamp();
+      const newScreenStatuses = { ...(order.screenStatuses || {}), [schermId]: true };
+      const allDone = allScreens.every((s) => {
+        if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || order.drankkaarten === 0 || newVal;
+        return newScreenStatuses[s.id] === true;
+      }) && newVal;
+      if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
+    } else if (!newVal && order.screenStatuses?.[schermId] === true) {
+      updates[`screenStatuses.${schermId}`] = false;
+      if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+    } else if (order.status === 'klaar' && !thisScreenNowDone) {
+      updates.status = 'besteld'; updates.completedAt = null;
+    }
+
+    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     await updateDoc(orderRef, updates);
   }
 
@@ -271,7 +312,7 @@ export default function SchermPage() {
               ✓ Klaar
               <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${showKlaar ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{done.length}</span>
             </button>
-            <button onClick={() => { logoutBar(); setAuthed(false); setOrders([]); setEvent(null); }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm">
+            <button onClick={() => { logoutBar(); router.push('/'); }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm">
               Afmelden
             </button>
           </div>

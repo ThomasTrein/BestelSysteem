@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   collection, getDocs, addDoc, deleteDoc, doc, updateDoc,
   query, orderBy, where, writeBatch, Timestamp, onSnapshot, serverTimestamp,
@@ -8,7 +9,7 @@ import {
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
 import { Event, MenuCategory, MenuItem, Table, Order, OrderItem, OptionGroup, OptionChoice, BarScreen, SelectedOption } from '@/lib/types';
-import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords } from '@/lib/auth';
+import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords, getBlockedKassaDevices, unblockKassaDevice } from '@/lib/auth';
 import ConfirmModal from '@/components/ConfirmModal';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
@@ -26,6 +27,7 @@ function fmt(t: unknown): string {
 }
 
 export default function AdminPage() {
+  const router = useRouter();
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -72,7 +74,7 @@ export default function AdminPage() {
       <header className="bg-gray-800 border-b border-gray-700 px-4 py-4 shadow-md">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <h1 className="text-xl font-bold text-white">⚙️ KSA Admin</h1>
-          <button onClick={() => { logoutAdmin(); setAuthed(false); }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-2 px-4 rounded-lg transition-colors text-sm">
+          <button onClick={() => { logoutAdmin(); router.push('/'); }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 font-medium py-2 px-4 rounded-lg transition-colors text-sm">
             Afmelden
           </button>
         </div>
@@ -1199,7 +1201,7 @@ function BestellingenTab() {
     setSelectedEvent(ev);
     setCategoryFilter('');
     if (selectedEventId) {
-      getDocs(query(collection(db, 'events', selectedEventId, 'screens'), orderBy('createdAt'))).then((snap) => {
+      getDocs(collection(db, 'events', selectedEventId, 'screens')).then((snap) => {
         setScreens(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen)));
       }).catch(() => setScreens([]));
       getDocs(query(collection(db, 'events', selectedEventId, 'categories'), orderBy('order'))).then((snap) => {
@@ -1599,10 +1601,16 @@ function Spinner() {
 function InstellingenTab() {
   const [barPw, setBarPw] = useState('');
   const [adminPw, setAdminPw] = useState('');
+  const [kassaPw, setKassaPw] = useState('');
   const [savingBar, setSavingBar] = useState(false);
   const [savingAdmin, setSavingAdmin] = useState(false);
+  const [savingKassa, setSavingKassa] = useState(false);
   const [barMsg, setBarMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [adminMsg, setAdminMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [kassaMsg, setKassaMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const [blockedDevices, setBlockedDevices] = useState<string[]>([]);
+  const [unblockingId, setUnblockingId] = useState<string | null>(null);
 
   const [accentColor, setAccentColor] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_accent_color') || '#16a34a' : '#16a34a'));
   const [appName, setAppName] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_app_name') || 'KSA Bestelapp' : 'KSA Bestelapp'));
@@ -1611,14 +1619,28 @@ function InstellingenTab() {
   const [dangerConfirm, setDangerConfirm] = useState(false);
   const [deletingOrders, setDeletingOrders] = useState(false);
 
+  useEffect(() => {
+    getBlockedKassaDevices().then(setBlockedDevices);
+  }, []);
+
+  async function handleUnblock(deviceId: string) {
+    setUnblockingId(deviceId);
+    try {
+      await unblockKassaDevice(deviceId);
+      setBlockedDevices((prev) => prev.filter((d) => d !== deviceId));
+    } finally {
+      setUnblockingId(null);
+    }
+  }
+
   async function handleSaveBarPw(e: React.FormEvent) {
     e.preventDefault();
     if (!barPw.trim()) { setBarMsg({ type: 'error', text: 'Vul een nieuw barwachtwoord in.' }); return; }
     setSavingBar(true);
     try {
       const snap = await (await import('firebase/firestore')).getDoc((await import('firebase/firestore')).doc((await import('@/lib/firebase')).db, 'settings', 'passwords'));
-      const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string } : {};
-      await updatePasswords(barPw.trim(), current.adminPassword || '');
+      const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string; kassaPassword?: string } : {};
+      await updatePasswords(barPw.trim(), current.adminPassword || '', current.kassaPassword);
       setBarMsg({ type: 'success', text: 'Barwachtwoord opgeslagen!' });
       setBarPw('');
     } catch { setBarMsg({ type: 'error', text: 'Fout bij opslaan.' }); }
@@ -1631,12 +1653,26 @@ function InstellingenTab() {
     setSavingAdmin(true);
     try {
       const snap = await (await import('firebase/firestore')).getDoc((await import('firebase/firestore')).doc((await import('@/lib/firebase')).db, 'settings', 'passwords'));
-      const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string } : {};
-      await updatePasswords(current.barPassword || '', adminPw.trim());
+      const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string; kassaPassword?: string } : {};
+      await updatePasswords(current.barPassword || '', adminPw.trim(), current.kassaPassword);
       setAdminMsg({ type: 'success', text: 'Adminwachtwoord opgeslagen!' });
       setAdminPw('');
     } catch { setAdminMsg({ type: 'error', text: 'Fout bij opslaan.' }); }
     finally { setSavingAdmin(false); }
+  }
+
+  async function handleSaveKassaPw(e: React.FormEvent) {
+    e.preventDefault();
+    if (!/^\d{4}$/.test(kassaPw)) { setKassaMsg({ type: 'error', text: 'Voer exact 4 cijfers in.' }); return; }
+    setSavingKassa(true);
+    try {
+      const snap = await (await import('firebase/firestore')).getDoc((await import('firebase/firestore')).doc((await import('@/lib/firebase')).db, 'settings', 'passwords'));
+      const current = snap.exists() ? snap.data() as { barPassword?: string; adminPassword?: string } : {};
+      await updatePasswords(current.barPassword || '', current.adminPassword || '', kassaPw);
+      setKassaMsg({ type: 'success', text: 'Kassa-pincode opgeslagen!' });
+      setKassaPw('');
+    } catch { setKassaMsg({ type: 'error', text: 'Fout bij opslaan.' }); }
+    finally { setSavingKassa(false); }
   }
 
   function handleAccentChange(color: string) {
@@ -1672,7 +1708,7 @@ function InstellingenTab() {
     <div className="space-y-6 max-w-2xl">
 
       {/* Wachtwoorden */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className={card}>
           <h2 className="text-base font-bold text-white mb-3">🍺 Barwachtwoord</h2>
           <form onSubmit={handleSaveBarPw} className="space-y-3">
@@ -1680,6 +1716,25 @@ function InstellingenTab() {
             {barMsg && <p className={`text-xs font-medium ${barMsg.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{barMsg.text}</p>}
             <button type="submit" disabled={savingBar} className="w-full bg-[var(--accent)] hover:brightness-90 disabled:opacity-50 text-white font-bold py-2 rounded-lg transition-all text-sm">
               {savingBar ? 'Opslaan...' : 'Opslaan'}
+            </button>
+          </form>
+        </div>
+        <div className={card}>
+          <h2 className="text-base font-bold text-white mb-3">🏪 Kassa-pincode</h2>
+          <form onSubmit={handleSaveKassaPw} className="space-y-3">
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="\d{4}"
+              maxLength={4}
+              value={kassaPw}
+              onChange={(e) => setKassaPw(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="4-cijferige pincode"
+              className={inp + ' w-full tracking-[0.5em] text-center text-lg font-bold'}
+            />
+            {kassaMsg && <p className={`text-xs font-medium ${kassaMsg.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{kassaMsg.text}</p>}
+            <button type="submit" disabled={savingKassa} className="w-full bg-[var(--accent)] hover:brightness-90 disabled:opacity-50 text-white font-bold py-2 rounded-lg transition-all text-sm">
+              {savingKassa ? 'Opslaan...' : 'Opslaan'}
             </button>
           </form>
         </div>
@@ -1729,6 +1784,28 @@ function InstellingenTab() {
           </div>
         </div>
       </div>
+
+      {/* Geblokkeerde kassa-toestellen */}
+      {blockedDevices.length > 0 && (
+        <div className={card + ' border-yellow-500/30'}>
+          <h2 className="text-base font-bold text-yellow-400 mb-2">🔒 Geblokkeerde kassa-toestellen</h2>
+          <p className="text-gray-400 text-sm mb-3">Deze toestellen zijn geblokkeerd na 3 mislukte inlogpogingen. Keur ze goed om ze opnieuw toegang te geven.</p>
+          <div className="space-y-2">
+            {blockedDevices.map((deviceId) => (
+              <div key={deviceId} className="flex items-center justify-between bg-gray-700/50 rounded-lg px-3 py-2">
+                <span className="text-gray-300 text-sm font-mono truncate max-w-[70%]">{deviceId}</span>
+                <button
+                  onClick={() => handleUnblock(deviceId)}
+                  disabled={unblockingId === deviceId}
+                  className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 font-semibold py-1 px-3 rounded-lg text-xs transition-colors disabled:opacity-50"
+                >
+                  {unblockingId === deviceId ? 'Bezig...' : '✓ Goedkeuren'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Danger zone */}
       <div className={card + ' border-red-500/30'}>

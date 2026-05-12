@@ -16,6 +16,12 @@ export default function Home() {
             🍹 Barscherm
           </Link>
           <Link
+            href="/kassa"
+            className="bg-green-50 text-green-800 font-semibold py-4 px-6 rounded-xl hover:bg-white transition-colors shadow-lg border border-green-300"
+          >
+            🏪 Kassa
+          </Link>
+          <Link
             href="/admin"
             className="bg-green-700 text-white font-semibold py-4 px-6 rounded-xl hover:bg-green-600 transition-colors shadow-lg border border-green-500"
           >
