@@ -857,6 +857,11 @@ export default function TafelPage() {
                       €{drankkaartPrice.toFixed(2)} per drankkaart
                     </span>
                   )}
+                  {(event?.drankkaartSlots ?? 0) > 0 && (
+                    <span className="text-sm font-medium text-blue-400">
+                      {event!.drankkaartSlots} vakjes
+                    </span>
+                  )}
                 </div>
                 <p className={`${textSub} text-sm mt-1`}>Heb je nog drankkaarten nodig?</p>
               </div>

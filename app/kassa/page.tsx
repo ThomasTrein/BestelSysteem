@@ -85,7 +85,7 @@ function PinNumpad({ onSuccess }: { onSuccess: () => void }) {
     <div key={i} className={`w-4 h-4 rounded-full border-2 transition-all ${i < pin.length ? 'bg-[var(--accent)] border-[var(--accent)]' : 'border-gray-500'}`} />
   ));
 
-  const keys = ['1','2','3','4','5','6','7','8','9'];
+  const keys = ['7','8','9','4','5','6','1','2','3'];
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">

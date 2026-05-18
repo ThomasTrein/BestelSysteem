@@ -9,7 +9,7 @@ import {
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { db } from '@/lib/firebase';
 import { Event, MenuCategory, MenuItem, Table, Order, OrderItem, OptionGroup, OptionChoice, BarScreen, SelectedOption } from '@/lib/types';
-import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords, getBlockedKassaDevices, unblockKassaDevice, getKassaDevicesInfo, updateKassaDeviceName, KassaDeviceInfo } from '@/lib/auth';
+import { checkAdminAuth, loginAdmin, logoutAdmin, updatePasswords, unblockKassaDevice, updateKassaDeviceName, KassaDeviceInfo, deleteKassaDevice } from '@/lib/auth';
 import ConfirmModal from '@/components/ConfirmModal';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
@@ -337,6 +337,16 @@ function EvenementenTab() {
               <div className="flex items-center gap-2 w-full">
                 <label className="text-gray-400 text-xs shrink-0">QR label:</label>
                 <input defaultValue={ev.qrLabel || 'Scan om te bestellen'} onBlur={(e) => updateEventField(ev, { qrLabel: e.target.value.trim() || 'Scan om te bestellen' })} className="bg-gray-700 border border-gray-600 text-white rounded px-2 py-1 text-xs flex-1 focus:outline-none" placeholder="Scan om te bestellen" />
+              </div>
+              <div className="flex flex-wrap gap-4 items-center">
+                <label className="flex items-center gap-2 cursor-pointer text-gray-300 text-xs">
+                  <input type="checkbox" checked={ev.barCanMarkDone !== false} onChange={() => updateEventField(ev, { barCanMarkDone: ev.barCanMarkDone === false })} className="rounded" />
+                  🍹 Barscherm: klaar-knop
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-gray-300 text-xs">
+                  <input type="checkbox" checked={ev.barHasDrankkaarten === true} onChange={() => updateEventField(ev, { barHasDrankkaarten: ev.barHasDrankkaarten !== true })} className="rounded" />
+                  🍹 Barscherm: drankkaartenbeheer
+                </label>
               </div>
               <EventPaymentMethods ev={ev} updateEventField={updateEventField} />
             </div>
@@ -895,8 +905,17 @@ function TafelsTab() {
     if (!bulkPrefix.trim() || bulkCount < 1 || !selectedEventId) return;
     setBulkAdding(true);
     try {
-      for (let i = 1; i <= bulkCount; i++) {
-        await addDoc(collection(db, 'events', selectedEventId, 'tables'), { name: `${bulkPrefix.trim()} ${i}` });
+      const prefix = bulkPrefix.trim();
+      // Find existing highest number for this prefix
+      const existingNumbers = tables
+        .map((t) => {
+          const match = t.name.match(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (\\d+)$`));
+          return match ? parseInt(match[1], 10) : 0;
+        })
+        .filter((n) => n > 0);
+      const startFrom = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
+      for (let i = startFrom; i < startFrom + bulkCount; i++) {
+        await addDoc(collection(db, 'events', selectedEventId, 'tables'), { name: `${prefix} ${i}` });
       }
       setBulkPrefix('');
     } finally {
@@ -1126,9 +1145,21 @@ function TafelsTab() {
                 ) : 'Aanmaken'}
               </button>
             </div>
-            {bulkPrefix.trim() && bulkCount > 0 && (
-              <p className="text-gray-500 text-xs mt-2">Maakt {bulkCount} tafels aan: &quot;{bulkPrefix.trim()} 1&quot; t/m &quot;{bulkPrefix.trim()} {bulkCount}&quot;</p>
-            )}
+            {bulkPrefix.trim() && bulkCount > 0 && (() => {
+              const prefix = bulkPrefix.trim();
+              const existingNumbers = tables
+                .map((t) => {
+                  const match = t.name.match(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (\\d+)$`));
+                  return match ? parseInt(match[1], 10) : 0;
+                })
+                .filter((n) => n > 0);
+              const startFrom = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
+              return (
+                <p className="text-gray-500 text-xs mt-2">
+                  Maakt {bulkCount} tafels aan: &quot;{prefix} {startFrom}&quot; t/m &quot;{prefix} {startFrom + bulkCount - 1}&quot;
+                </p>
+              );
+            })()}
           </div>
 
           {tables.length > 0 && (
@@ -1682,6 +1713,7 @@ function InstellingenTab() {
   const [devicesInfo, setDevicesInfo] = useState<Record<string, KassaDeviceInfo>>({});
   const [editingDeviceName, setEditingDeviceName] = useState<string | null>(null);
   const [editDeviceNameVal, setEditDeviceNameVal] = useState('');
+  const [deletingDeviceId, setDeletingDeviceId] = useState<string | null>(null);
 
   const [accentColor, setAccentColor] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_accent_color') || '#16a34a' : '#16a34a'));
   const [appName, setAppName] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('ksa_app_name') || 'KSA Bestelapp' : 'KSA Bestelapp'));
@@ -1691,8 +1723,17 @@ function InstellingenTab() {
   const [deletingOrders, setDeletingOrders] = useState(false);
 
   useEffect(() => {
-    getBlockedKassaDevices().then(setBlockedDevices);
-    getKassaDevicesInfo().then(setDevicesInfo);
+    const ref = doc(db, 'settings', 'kassaDevices');
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        setBlockedDevices(snap.data().blocked || []);
+        setDevicesInfo(snap.data().deviceInfo || {});
+      } else {
+        setBlockedDevices([]);
+        setDevicesInfo({});
+      }
+    });
+    return () => unsub();
   }, []);
 
   async function handleUnblock(deviceId: string) {
@@ -1702,6 +1743,15 @@ function InstellingenTab() {
       setBlockedDevices((prev) => prev.filter((d) => d !== deviceId));
     } finally {
       setUnblockingId(null);
+    }
+  }
+
+  async function handleDeleteDevice(deviceId: string) {
+    setDeletingDeviceId(deviceId);
+    try {
+      await deleteKassaDevice(deviceId);
+    } finally {
+      setDeletingDeviceId(null);
     }
   }
 
@@ -1885,13 +1935,23 @@ function InstellingenTab() {
                         ) : null}
                         <p className="text-gray-400 text-xs font-mono truncate max-w-[200px]">{deviceId}</p>
                       </div>
-                      <button
-                        onClick={() => handleUnblock(deviceId)}
-                        disabled={unblockingId === deviceId}
-                        className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 font-semibold py-1 px-3 rounded-lg text-xs transition-colors disabled:opacity-50"
-                      >
-                        {unblockingId === deviceId ? 'Bezig...' : '✓ Goedkeuren'}
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleUnblock(deviceId)}
+                          disabled={unblockingId === deviceId}
+                          className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 font-semibold py-1 px-3 rounded-lg text-xs transition-colors disabled:opacity-50"
+                        >
+                          {unblockingId === deviceId ? 'Bezig...' : '✓ Goedkeuren'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDevice(deviceId)}
+                          disabled={deletingDeviceId === deviceId}
+                          className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-semibold py-1 px-2 rounded-lg text-xs transition-colors disabled:opacity-50"
+                          title="Verwijderen"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1923,13 +1983,23 @@ function InstellingenTab() {
                           )}
                         </p>
                       </div>
-                      <button
-                        onClick={() => { setEditingDeviceName(deviceId); setEditDeviceNameVal(info.name || ''); }}
-                        className="text-gray-400 hover:text-white text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded transition-colors flex-shrink-0"
-                        title="Naam bewerken"
-                      >
-                        ✏️
-                      </button>
+                      <div className="flex gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => { setEditingDeviceName(deviceId); setEditDeviceNameVal(info.name || ''); }}
+                          className="text-gray-400 hover:text-white text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded transition-colors"
+                          title="Naam bewerken"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDevice(deviceId)}
+                          disabled={deletingDeviceId === deviceId}
+                          className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-semibold py-1 px-2 rounded-lg text-xs transition-colors disabled:opacity-50"
+                          title="Verwijderen"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                     {editingDeviceName === deviceId && (
                       <div className="flex gap-2 mt-1">
@@ -2331,8 +2401,8 @@ function SchermenTab() {
             ) : (
               screens.map((screen) => (
                 <div key={screen.id} className={card}>
-                  <div className="flex justify-between items-start gap-4">
-                    <div className="min-w-0">
+                  <div className="space-y-3">
+                    <div>
                       <p className="font-bold text-white">{screen.name}</p>
                       <p className="text-gray-400 text-xs font-mono mt-1 break-all">{origin}/bar/scherm/{screen.id}</p>
                       <div className="flex flex-wrap gap-1 mt-2">
@@ -2356,7 +2426,7 @@ function SchermenTab() {
                         })}
                       </div>
                     </div>
-                    <div className="flex gap-2 shrink-0">
+                    <div className="flex flex-wrap gap-2">
                       <button onClick={() => startEditScreen(screen)} className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 font-semibold py-1.5 px-3 rounded-lg text-sm transition-colors">
                         ✏️ Aanpassen
                       </button>

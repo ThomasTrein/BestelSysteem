@@ -7,14 +7,42 @@ const KASSA_SESSION_KEY = 'ksa_kassa_session';
 const KASSA_ATTEMPTS_KEY = 'ksa_kassa_attempts';
 const KASSA_DEVICE_KEY = 'ksa_kassa_device_id';
 
-function getOrCreateDeviceId(): string {
+function getDeviceFingerprint(): string {
   if (typeof window === 'undefined') return 'server';
-  let id = localStorage.getItem(KASSA_DEVICE_KEY);
-  if (!id) {
-    id = 'dev-' + Math.random().toString(36).slice(2, 10) + '-' + Date.now().toString(36);
-    localStorage.setItem(KASSA_DEVICE_KEY, id);
+  try {
+    const nav = navigator as Navigator & { deviceMemory?: number };
+    const parts = [
+      screen.width,
+      screen.height,
+      screen.colorDepth,
+      Math.round((window.devicePixelRatio || 1) * 10),
+      navigator.hardwareConcurrency || 0,
+      nav.deviceMemory || 0,
+      navigator.language || '',
+      Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      navigator.platform || '',
+      navigator.maxTouchPoints || 0,
+    ].join('::');
+    // djb2 hash
+    let hash = 5381;
+    for (let i = 0; i < parts.length; i++) {
+      hash = ((hash << 5) + hash) ^ parts.charCodeAt(i);
+      hash = hash >>> 0;
+    }
+    return 'fp-' + hash.toString(36);
+  } catch {
+    // Fallback to localStorage-based ID if fingerprint fails
+    let id = localStorage.getItem(KASSA_DEVICE_KEY);
+    if (!id) {
+      id = 'dev-' + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem(KASSA_DEVICE_KEY, id);
+    }
+    return id;
   }
-  return id;
+}
+
+function getOrCreateDeviceId(): string {
+  return getDeviceFingerprint();
 }
 
 async function getPasswords(): Promise<{ barPassword: string; adminPassword: string; kassaPassword: string }> {
@@ -98,6 +126,17 @@ export async function blockKassaDevice(): Promise<void> {
 export async function unblockKassaDevice(deviceId: string): Promise<void> {
   const ref = doc(db, 'settings', 'kassaDevices');
   await updateDoc(ref, { blocked: arrayRemove(deviceId) });
+}
+
+export async function deleteKassaDevice(deviceId: string): Promise<void> {
+  const ref = doc(db, 'settings', 'kassaDevices');
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  const blocked: string[] = (data.blocked || []).filter((id: string) => id !== deviceId);
+  const deviceInfo = { ...(data.deviceInfo || {}) };
+  delete deviceInfo[deviceId];
+  await updateDoc(ref, { blocked, deviceInfo });
 }
 
 export async function getBlockedKassaDevices(): Promise<string[]> {

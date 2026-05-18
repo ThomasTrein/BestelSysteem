@@ -103,6 +103,20 @@ export default function BarPage() {
     await updateDoc(orderRef, updates);
   }
 
+  async function toggleDrankkaartDone(order: Order) {
+    if (!event) return;
+    const newVal = !(order.drankkaartDone ?? false);
+    const orderRef = doc(db, 'events', event.id, 'orders', order.id);
+    const updates: Record<string, unknown> = { drankkaartDone: newVal };
+    if (newVal) {
+      const allItemsDone = order.items.every((_, i) => (order.itemStatuses?.[String(i)] ?? false) === true);
+      if (allItemsDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
+    } else {
+      if (order.status === 'klaar') { updates.status = 'besteld'; updates.completedAt = null; }
+    }
+    await updateDoc(orderRef, updates);
+  }
+
   function orderHasItemsForScreen(order: Order, s: BarScreen): boolean {
     const catNames = new Set(
       (s.categoryIds || []).map((catId) => categories.find((c) => c.id === catId)?.name).filter(Boolean) as string[]
@@ -206,7 +220,7 @@ export default function BarPage() {
           {besteld.length > 0 && (
             <div className={`grid ${colClass[columns] || 'grid-cols-2'} gap-4 mb-6`}>
               {besteld.map((o) => (
-                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={screensForOrder(o)} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={() => handleMarkOrderDone(o)} />
+                <OrderCard key={o.id} order={o} fmt={fmt} allScreens={screensForOrder(o)} now={now} onToggleItem={(idx) => toggleItem(o, idx)} onMarkDone={event.barCanMarkDone !== false ? () => handleMarkOrderDone(o) : undefined} onToggleDrankkaart={event.barHasDrankkaarten ? () => toggleDrankkaartDone(o) : undefined} />
               ))}
             </div>
           )}
@@ -253,13 +267,14 @@ function formatDuration(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function OrderCard({ order, fmt, allScreens, now, onToggleItem, onMarkDone }: {
+function OrderCard({ order, fmt, allScreens, now, onToggleItem, onMarkDone, onToggleDrankkaart }: {
   order: Order;
   fmt: (t: unknown) => string;
   allScreens: BarScreen[];
   now: number;
   onToggleItem: (itemIndex: number) => void;
   onMarkDone?: () => void;
+  onToggleDrankkaart?: () => void;
 }) {
   const isDone = order.status === 'klaar';
   const totalVakjes = order.items.reduce((sum, i) => sum + (i.slots || 0) * i.quantity, 0);
@@ -361,17 +376,35 @@ function OrderCard({ order, fmt, allScreens, now, onToggleItem, onMarkDone }: {
         ))}
 
         {order.drankkaarten > 0 && (
-          <div className={`border rounded-lg px-3 py-2 ${order.drankkaartDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-yellow-400/10 border-yellow-400/20'}`}>
-            <p className={`font-semibold ${order.drankkaartDone ? 'line-through text-gray-400' : 'text-yellow-400'}`}>
-              🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}
-              {order.drankkaartDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
-              {order.drankkaartPaymentMethod && !order.drankkaartDone && (
-                <span className="ml-2 text-sm font-normal bg-yellow-400/20 px-2 py-0.5 rounded-full">
-                  💳 {order.drankkaartPaymentMethod}
-                </span>
-              )}
-            </p>
-          </div>
+          onToggleDrankkaart ? (
+            <button
+              type="button"
+              onClick={onToggleDrankkaart}
+              className={`w-full text-left border rounded-lg px-3 py-2 transition-colors cursor-pointer ${order.drankkaartDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-yellow-400/10 border-yellow-400/20 hover:bg-yellow-400/15'}`}
+            >
+              <p className={`font-semibold ${order.drankkaartDone ? 'line-through text-gray-400' : 'text-yellow-400'}`}>
+                🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}
+                {order.drankkaartDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+                {order.drankkaartPaymentMethod && !order.drankkaartDone && (
+                  <span className="ml-2 text-sm font-normal bg-yellow-400/20 px-2 py-0.5 rounded-full">
+                    💳 {order.drankkaartPaymentMethod}
+                  </span>
+                )}
+              </p>
+            </button>
+          ) : (
+            <div className={`border rounded-lg px-3 py-2 ${order.drankkaartDone ? 'bg-green-500/20 border-green-500/40 opacity-60' : 'bg-yellow-400/10 border-yellow-400/20'}`}>
+              <p className={`font-semibold ${order.drankkaartDone ? 'line-through text-gray-400' : 'text-yellow-400'}`}>
+                🎫 {order.drankkaarten} drankkaart{order.drankkaarten !== 1 ? 'en' : ''}
+                {order.drankkaartDone && <span className="ml-2 text-green-400 text-sm no-underline">✓</span>}
+                {order.drankkaartPaymentMethod && !order.drankkaartDone && (
+                  <span className="ml-2 text-sm font-normal bg-yellow-400/20 px-2 py-0.5 rounded-full">
+                    💳 {order.drankkaartPaymentMethod}
+                  </span>
+                )}
+              </p>
+            </div>
+          )
         )}
         {order.note && (
           <div className="bg-gray-700/40 rounded-lg px-3 py-2">

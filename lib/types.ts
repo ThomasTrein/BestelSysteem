@@ -81,6 +81,8 @@ export interface Event {
   drankkaartPrice?: number; // fixed euro price per drankkaart (replaces slots calculation)
   qrLabel?: string;// label printed under QR codes
   drankkaartPaymentMethods?: string[];
+  barCanMarkDone?: boolean;   // whether general bar page can mark orders as done (default: true)
+  barHasDrankkaarten?: boolean; // whether general bar page handles drankkaarten toggle
 }
 
 export interface BarScreen {
