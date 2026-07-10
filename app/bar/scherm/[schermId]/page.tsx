@@ -308,7 +308,6 @@ export default function SchermPage() {
             )}
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <a href="/bar" className="text-gray-400 hover:text-white text-sm transition-colors">← Terug naar bar</a>
             <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
               <span className="hidden sm:inline text-gray-400 text-xs px-1">Kolommen:</span>
               {[1, 2, 3, 4].map((n) => (

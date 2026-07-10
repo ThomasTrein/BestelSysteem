@@ -466,7 +466,7 @@ export default function TafelPage() {
         <div className="text-center mb-6">
           <div className="text-5xl mb-3">👋</div>
           <h1 className={`text-2xl font-bold ${textMain}`}>{event?.name}</h1>
-          <p className={textSub + ' mt-1'}>Tafel {table?.name}</p>
+          <p className={textSub + ' mt-1'}>{table?.name}</p>
         </div>
         <p className={`${isDark ? 'text-gray-300' : 'text-gray-700'} font-medium mb-4 text-center`}>Wat is je naam?</p>
         <form onSubmit={(e) => { e.preventDefault(); if (customerName.trim()) setNameDone(true); }} className="space-y-4">

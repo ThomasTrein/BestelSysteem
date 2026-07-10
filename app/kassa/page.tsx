@@ -1,11 +1,11 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  collection, query, where, getDocs, addDoc, serverTimestamp, orderBy, doc, setDoc,
+  collection, query, where, getDocs, addDoc, serverTimestamp, orderBy, onSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Event, MenuCategory, MenuItem, OptionGroup, OrderItem, SelectedOption } from '@/lib/types';
+import { Event, MenuCategory, MenuItem, OptionGroup, OrderItem, SelectedOption, Table } from '@/lib/types';
 import {
   checkKassaAuth, loginKassa, logoutKassa, getKassaAttempts, isKassaDeviceBlocked,
 } from '@/lib/auth';
@@ -24,7 +24,70 @@ interface CartEntry {
   selectedOptions: SelectedOption[];
 }
 
-const KASSA_TABLE_NAME = 'Kassa';
+// Natural sort so "Tafel 2" comes before "Tafel 10"
+function naturalCompare(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// ---------- TAFEL COMBOBOX ----------
+function TableCombobox({ tables, selectedTableId, onSelect }: {
+  tables: Table[];
+  selectedTableId: string | null;
+  onSelect: (table: Table | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const selectedTable = tables.find((t) => t.id === selectedTableId) || null;
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  const filtered = tables.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
+  const displayValue = open ? search : (selectedTable?.name || '');
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        type="text"
+        value={displayValue}
+        onChange={(e) => setSearch(e.target.value)}
+        onFocus={() => { setOpen(true); setSearch(''); }}
+        placeholder="🔍 Zoek tafel..."
+        className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] placeholder-gray-400"
+      />
+      {open && (
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-56 overflow-y-auto">
+          {tables.length === 0 ? (
+            <p className="text-gray-500 text-xs px-3 py-3 text-center">Geen tafels beschikbaar — voeg tafels toe in Admin</p>
+          ) : filtered.length === 0 ? (
+            <p className="text-gray-500 text-xs px-3 py-3 text-center">Geen tafels gevonden</p>
+          ) : (
+            filtered.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { onSelect(t); setOpen(false); setSearch(''); }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors ${t.id === selectedTableId ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'text-gray-200 hover:bg-gray-700'}`}
+              >
+                {t.name}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------- PIN NUMPAD ----------
 function PinNumpad({ onSuccess }: { onSuccess: () => void }) {
@@ -223,6 +286,8 @@ export default function KassaPage() {
   const [event, setEvent] = useState<Event | null>(null);
   const [categories, setCategories] = useState<CategoryWithItems[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tables, setTables] = useState<Table[]>([]);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartEntry[]>([]);
@@ -265,6 +330,16 @@ export default function KassaPage() {
     }
     load();
   }, [authed]);
+
+  useEffect(() => {
+    if (!event) return;
+    const unsub = onSnapshot(collection(db, 'events', event.id, 'tables'), (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Table));
+      list.sort((a, b) => naturalCompare(a.name, b.name));
+      setTables(list);
+    });
+    return () => unsub();
+  }, [event]);
 
   function cartKey(itemId: string, opts: SelectedOption[]): string {
     return itemId + '|' + JSON.stringify(opts.map((o) => ({ g: o.groupId, s: [...o.selected].sort() })));
@@ -314,22 +389,15 @@ export default function KassaPage() {
     }
   }
 
-  async function getOrCreateKassaTable(eventId: string): Promise<{ id: string; name: string }> {
-    const tablesSnap = await getDocs(query(collection(db, 'events', eventId, 'tables'), where('name', '==', KASSA_TABLE_NAME)));
-    if (!tablesSnap.empty) return { id: tablesSnap.docs[0].id, name: KASSA_TABLE_NAME };
-    const ref = doc(collection(db, 'events', eventId, 'tables'));
-    await setDoc(ref, { name: KASSA_TABLE_NAME });
-    return { id: ref.id, name: KASSA_TABLE_NAME };
-  }
-
   const totalItems = cart.reduce((s, e) => s + e.quantity, 0) + drankkaarten;
 
   async function handleSubmit() {
     if (!event || (totalItems === 0)) return;
     if (!customerName.trim()) return;
+    const table = tables.find((t) => t.id === selectedTableId);
+    if (!table) return;
     setSubmitting(true);
     try {
-      const table = await getOrCreateKassaTable(event.id);
       const items: OrderItem[] = cart.map((e) => ({
         itemId: e.itemId,
         name: e.name,
@@ -358,6 +426,7 @@ export default function KassaPage() {
       setDrankkaartPaymentMethod('');
       setNote('');
       setCustomerName('');
+      setSelectedTableId(null);
       const count = items.reduce((s, i) => s + i.quantity, 0) + drankkaarten;
       setSuccessMsg(`✓ Bestelling geplaatst! (${count} item${count !== 1 ? 's' : ''})`);
       setTimeout(() => setSuccessMsg(''), 3000);
@@ -384,7 +453,7 @@ export default function KassaPage() {
   const selectedCat = categories.find((c) => c.id === selectedCatId) || null;
   const drankkaartPrice = event.drankkaartPrice ?? (event.drankkaartSlots * (event.pricePerSlot ?? 0));
   const paymentMethods = event.drankkaartPaymentMethods || [];
-  const canPlace = totalItems > 0 && customerName.trim().length > 0;
+  const canPlace = totalItems > 0 && customerName.trim().length > 0 && !!selectedTableId;
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
@@ -513,8 +582,9 @@ export default function KassaPage() {
             <p className="text-white font-bold text-sm">Bestelling</p>
           </div>
 
-          {/* Name field */}
-          <div className="px-3 pt-3">
+          {/* Table + Name fields */}
+          <div className="px-3 pt-3 space-y-2">
+            <TableCombobox tables={tables} selectedTableId={selectedTableId} onSelect={(t) => setSelectedTableId(t?.id ?? null)} />
             <input
               type="text"
               value={customerName}
@@ -588,7 +658,10 @@ export default function KassaPage() {
             >
               {submitting ? 'Bezig...' : `✓ Plaatsen${totalItems > 0 ? ` (${totalItems})` : ''}`}
             </button>
-            {totalItems > 0 && !customerName.trim() && (
+            {totalItems > 0 && !selectedTableId && (
+              <p className="text-yellow-400 text-xs text-center">Kies eerst een tafel</p>
+            )}
+            {totalItems > 0 && !!selectedTableId && !customerName.trim() && (
               <p className="text-yellow-400 text-xs text-center">Voer eerst een naam in</p>
             )}
           </div>
