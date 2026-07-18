@@ -974,6 +974,7 @@ function TafelsTab() {
       const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(url)}`;
       return `
           <div class="half">
+            <p class="event-name">${event?.name || ''}</p>
             <img src="${qrSrc}" width="320" height="320" alt="QR ${table.name}" />
             <p class="table-name">${table.name}</p>
             <p class="label">${label}</p>
@@ -1016,8 +1017,9 @@ function TafelsTab() {
     justify-content: center;
     text-align: center;
   }
+  .event-name { margin-bottom: 10px; font-size: 20px; color: #777; }
   .table-name { margin-top: 14px; font-size: 28px; font-weight: bold; color: #111; }
-  .label { margin-top: 6px; font-size: 18px; color: #555; }
+  .label { margin-top: 6px; font-size: 28px; color: #555; }
 </style>
 </head><body>${pages.join('')}<script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}<\/script></body></html>`);
     win.document.close();
@@ -1068,6 +1070,15 @@ function TafelsTab() {
           const imgData = canvas.toDataURL('image/png');
           const imgX = cellX + (cellW - qrSizeMm) / 2;
           const imgY = cellY + (cellH - qrSizeMm) / 2 - 6;
+
+          // Event name above QR
+          if (event?.name) {
+            pdf.setFontSize(10);
+            pdf.setFont('helvetica', 'normal');
+            pdf.setTextColor(120, 120, 120);
+            pdf.text(event.name, cellX + cellW / 2, imgY - 3, { align: 'center' });
+          }
+
           pdf.addImage(imgData, 'PNG', imgX, imgY, qrSizeMm, qrSizeMm);
 
           // Table name
@@ -1077,10 +1088,10 @@ function TafelsTab() {
           pdf.text(tables[i].name, cellX + cellW / 2, imgY + qrSizeMm + 5, { align: 'center' });
 
           // Label
-          pdf.setFontSize(10);
+          pdf.setFontSize(14);
           pdf.setFont('helvetica', 'normal');
           pdf.setTextColor(100, 100, 100);
-          pdf.text(label, cellX + cellW / 2, imgY + qrSizeMm + 10, { align: 'center' });
+          pdf.text(label, cellX + cellW / 2, imgY + qrSizeMm + 11, { align: 'center' });
         }
       }
 
@@ -1211,9 +1222,11 @@ function TafelsTab() {
               return (
                 <div key={table.id} className="bg-gray-800 border border-gray-700 rounded-xl p-4 text-center">
                   <h3 className="font-bold text-xl text-white mb-3">{table.name}</h3>
+                  {selectedEvent?.name && <p className="text-sm text-gray-400 mb-2">{selectedEvent.name}</p>}
                   <div className="flex justify-center mb-3 bg-white p-3 rounded-lg inline-block mx-auto">
                     <QRCodeSVG value={url} size={160} />
                   </div>
+                  <p className="text-xl font-bold text-gray-400 mb-2">{qrLabel}</p>
                   <p className="text-xs text-gray-500 mb-4 break-all font-mono">{url}</p>
                   <div className="flex gap-2 justify-center">
                     <button onClick={() => window.open(url, '_blank')} className="bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors">
