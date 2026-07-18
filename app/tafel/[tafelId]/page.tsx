@@ -452,7 +452,7 @@ export default function TafelPage() {
       <div className="text-center text-white">
         <div className="text-7xl mb-6">🎉</div>
         <h1 className="text-3xl font-bold mb-3">Bedankt, {customerName}!</h1>
-        <p className="text-white/80 text-lg mb-8">Je bestelling is geplaatst.</p>
+        <p className="text-white/80 text-lg mb-8">Je bestelling is geplaatst en wordt zo dadelijk aan je tafel geleverd.</p>
         <button onClick={resetOrder} className="bg-white font-semibold py-3 px-8 rounded-xl hover:bg-white/90 transition-colors shadow-lg" style={{ color: accent }}>
           Nieuwe bestelling
         </button>
