@@ -1,15 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, query, where, onSnapshot, getDocs, orderBy, Timestamp, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Event, Order, OrderItem, MenuCategory, BarScreen } from '@/lib/types';
 import { checkBarAuth, loginBar, logoutBar } from '@/lib/auth';
+import { setupAudioUnlock, playDing } from '@/lib/notificationSound';
 
 function getStoredColumns(): number {
   if (typeof window === 'undefined') return 2;
   return parseInt(localStorage.getItem('ksa_bar_columns') || '2', 10);
+}
+
+function getStoredSound(): boolean {
+  if (typeof window === 'undefined') return true;
+  const v = localStorage.getItem('ksa_bar_sound_general');
+  return v === null ? true : v === '1';
 }
 
 export default function BarPage() {
@@ -26,16 +33,33 @@ export default function BarPage() {
   const [columns, setColumns] = useState<number>(2);
   const [showKlaar, setShowKlaar] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const seenOrderIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     if (checkBarAuth()) setAuthed(true);
     setColumns(getStoredColumns());
+    setSoundEnabled(getStoredSound());
+    setupAudioUnlock();
   }, []);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Play a "ding" for any order that is new (arrived after this page was opened).
+  // Skips the very first snapshot so pre-existing orders never trigger a sound on load.
+  useEffect(() => {
+    const ids = orders.map((o) => o.id);
+    if (seenOrderIdsRef.current === null) {
+      seenOrderIdsRef.current = new Set(ids);
+      return;
+    }
+    const hasNew = ids.some((id) => !seenOrderIdsRef.current!.has(id));
+    seenOrderIdsRef.current = new Set(ids);
+    if (hasNew && soundEnabled) playDing();
+  }, [orders, soundEnabled]);
 
   useEffect(() => {
     if (!authed) return;
@@ -77,7 +101,7 @@ export default function BarPage() {
     const newVal = !current;
     const newItemStatuses = { ...(order.itemStatuses || {}), [String(itemIndex)]: newVal };
     const allItemsDone = order.items.every((_, i) => newItemStatuses[String(i)] === true);
-    const drankkaartDone = order.drankkaartDone ?? (order.drankkaarten === 0);
+    const drankkaartDone = order.drankkaartDone ?? ((order.drankkaarten || 0) === 0);
     const allDone = allItemsDone && drankkaartDone;
     const orderRef = doc(db, 'events', event.id, 'orders', order.id);
     const updates: Record<string, unknown> = { [`itemStatuses.${itemIndex}`]: newVal };
@@ -122,7 +146,7 @@ export default function BarPage() {
       (s.categoryIds || []).map((catId) => categories.find((c) => c.id === catId)?.name).filter(Boolean) as string[]
     );
     const itemIds = new Set(s.itemIds || []);
-    if (s.hasDrankkaarten && order.drankkaarten > 0) return true;
+    if (s.hasDrankkaarten && (order.drankkaarten || 0) > 0) return true;
     return order.items.some((item) => catNames.has(item.categoryName) || itemIds.has(item.itemId));
   }
 
@@ -133,6 +157,12 @@ export default function BarPage() {
   function changeColumns(n: number) {
     setColumns(n);
     localStorage.setItem('ksa_bar_columns', String(n));
+  }
+
+  function toggleSound() {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    localStorage.setItem('ksa_bar_sound_general', next ? '1' : '0');
   }
 
   function fmt(t: unknown): string {
@@ -191,6 +221,23 @@ export default function BarPage() {
               {[1, 2, 3, 4].map((n) => (
                 <button key={n} onClick={() => changeColumns(n)} className={`w-9 h-9 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-[var(--accent)] text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
               ))}
+            </div>
+            <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
+              <button
+                onClick={toggleSound}
+                title={soundEnabled ? 'Geluid staat aan' : 'Geluid staat uit'}
+                className={`flex items-center gap-1 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm ${soundEnabled ? 'text-white' : 'text-gray-500'}`}
+              >
+                {soundEnabled ? '🔔' : '🔕'}
+                <span className="hidden sm:inline">{soundEnabled ? 'Geluid aan' : 'Geluid uit'}</span>
+              </button>
+              <button
+                onClick={() => playDing()}
+                title="Test geluid"
+                className="text-gray-400 hover:text-white py-1.5 px-2 rounded-lg transition-colors text-sm"
+              >
+                🔊 Test
+              </button>
             </div>
             <button
               onClick={() => setShowKlaar((v) => !v)}

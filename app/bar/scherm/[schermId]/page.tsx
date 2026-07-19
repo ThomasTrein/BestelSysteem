@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   collection, query, where, onSnapshot, getDocs, doc,
@@ -9,10 +9,17 @@ import {
 import { db } from '@/lib/firebase';
 import { Event, Order, OrderItem, MenuCategory, BarScreen } from '@/lib/types';
 import { checkBarAuth, loginBar, logoutBar } from '@/lib/auth';
+import { setupAudioUnlock, playDing } from '@/lib/notificationSound';
 
 function getStoredColumns(): number {
   if (typeof window === 'undefined') return 2;
   return parseInt(localStorage.getItem('ksa_bar_columns') || '2', 10);
+}
+
+function getStoredSound(schermId: string): boolean {
+  if (typeof window === 'undefined') return true;
+  const v = localStorage.getItem(`ksa_bar_sound_${schermId}`);
+  return v === null ? true : v === '1';
 }
 
 export default function SchermPage() {
@@ -33,11 +40,15 @@ export default function SchermPage() {
   const [columns, setColumns] = useState<number>(2);
   const [showKlaar, setShowKlaar] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const seenOrderIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     if (checkBarAuth()) setAuthed(true);
     setColumns(getStoredColumns());
-  }, []);
+    setSoundEnabled(getStoredSound(schermId));
+    setupAudioUnlock();
+  }, [schermId]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -46,7 +57,8 @@ export default function SchermPage() {
 
   useEffect(() => {
     if (!authed) return;
-    let unsub: (() => void) | undefined;
+    let unsubOrders: (() => void) | undefined;
+    let unsubScreens: (() => void) | undefined;
     async function setup() {
       setLoading(true);
       const snap = await getDocs(query(collection(db, 'events'), where('active', '==', true)));
@@ -54,22 +66,22 @@ export default function SchermPage() {
       const ev = { id: snap.docs[0].id, ...snap.docs[0].data() } as Event;
       setEvent(ev);
 
-      const screensSnap = await getDocs(collection(db, 'events', ev.id, 'screens'));
-      const screens = screensSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen));
-      setAllScreens(screens);
-      const thisScreen = screens.find((s) => s.id === schermId) || null;
-      setScreen(thisScreen);
+      unsubScreens = onSnapshot(collection(db, 'events', ev.id, 'screens'), (screensSnap) => {
+        const screens = screensSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BarScreen));
+        setAllScreens(screens);
+        setScreen(screens.find((s) => s.id === schermId) || null);
+      });
 
       const catsSnap = await getDocs(collection(db, 'events', ev.id, 'categories'));
       setCategories(catsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MenuCategory)));
 
-      unsub = onSnapshot(
+      unsubOrders = onSnapshot(
         query(collection(db, 'events', ev.id, 'orders'), orderBy('createdAt', 'asc')),
         (s) => { setOrders(s.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)); setLoading(false); }
       );
     }
     setup();
-    return () => { if (unsub) unsub(); };
+    return () => { if (unsubOrders) unsubOrders(); if (unsubScreens) unsubScreens(); };
   }, [authed, schermId]);
 
   async function handleLogin(e: React.FormEvent) {
@@ -84,6 +96,12 @@ export default function SchermPage() {
   function changeColumns(n: number) {
     setColumns(n);
     localStorage.setItem('ksa_bar_columns', String(n));
+  }
+
+  function toggleSound() {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    localStorage.setItem(`ksa_bar_sound_${schermId}`, next ? '1' : '0');
   }
 
   const screenCategoryNames = new Set(
@@ -108,13 +126,30 @@ export default function SchermPage() {
   }
 
   function orderMatchesThisScreen(order: Order): boolean {
-    if (screen?.hasDrankkaarten && order.drankkaarten > 0) return true;
+    if (screen?.hasDrankkaarten && (order.drankkaarten || 0) > 0) return true;
     return order.items.some(itemMatchesThisScreen);
   }
 
   function isThisScreenDone(order: Order): boolean {
     return order.screenStatuses?.[schermId] === true;
   }
+
+  // Play a "ding" for orders that are new (arrived after this page was opened)
+  // and relevant to this screen. Skips the very first snapshot so pre-existing
+  // orders never trigger a sound on load.
+  useEffect(() => {
+    const relevantIds = orders.filter(orderMatchesThisScreen).map((o) => o.id);
+    if (seenOrderIdsRef.current === null) {
+      seenOrderIdsRef.current = new Set(relevantIds);
+      return;
+    }
+    const hasNew = relevantIds.some((id) => !seenOrderIdsRef.current!.has(id));
+    seenOrderIdsRef.current = new Set(relevantIds);
+    if (hasNew && soundEnabled) playDing();
+    // orderMatchesThisScreen is intentionally omitted: it is recreated every render from
+    // screen/categories, which are already listed as dependencies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, screen, categories, soundEnabled]);
 
   function getOtherPendingScreens(order: Order): BarScreen[] {
     return allScreens.filter((s) => {
@@ -138,7 +173,7 @@ export default function SchermPage() {
 
     // Mark drankkaarten as done if this screen handles them
     const drankkaartUpdate: Record<string, unknown> = {};
-    if (screen?.hasDrankkaarten && order.drankkaarten > 0) {
+    if (screen?.hasDrankkaarten && (order.drankkaarten || 0) > 0) {
       drankkaartUpdate.drankkaartDone = true;
     }
 
@@ -146,13 +181,13 @@ export default function SchermPage() {
     order.items.forEach((item, i) => {
       if (itemMatchesThisScreen(item)) newItemStatuses[String(i)] = true;
     });
-    const drankkaartDone = (drankkaartUpdate.drankkaartDone as boolean | undefined) ?? (order.drankkaartDone ?? (order.drankkaarten === 0));
+    const drankkaartDone = (drankkaartUpdate.drankkaartDone as boolean | undefined) ?? (order.drankkaartDone ?? ((order.drankkaarten || 0) === 0));
 
     const allDone = allScreens.every((s) => {
-      if (s.hasDrankkaarten && order.drankkaarten > 0) {
+      if (s.hasDrankkaarten && (order.drankkaarten || 0) > 0) {
         if (!drankkaartDone && s.id !== schermId) return false;
       }
-      if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || order.drankkaarten === 0 || drankkaartDone;
+      if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || (order.drankkaarten || 0) === 0 || drankkaartDone;
       return s.id === schermId ? true : newStatuses[s.id] === true;
     });
 
@@ -178,7 +213,7 @@ export default function SchermPage() {
         itemResets[`itemStatuses.${i}`] = false;
       }
     });
-    const drankkaartReset = screen?.hasDrankkaarten && order.drankkaarten > 0 ? { drankkaartDone: false } : {};
+    const drankkaartReset = screen?.hasDrankkaarten && (order.drankkaarten || 0) > 0 ? { drankkaartDone: false } : {};
     await updateDoc(orderRef, {
       [`screenStatuses.${schermId}`]: false,
       status: 'besteld',
@@ -198,7 +233,7 @@ export default function SchermPage() {
     // Check if all items for THIS screen are now done
     const myItemIndices = order.items.map((item, i) => ({ item, i })).filter(({ item }) => itemMatchesThisScreen(item));
     const allMyItemsDone = myItemIndices.every(({ i }) => newItemStatuses[String(i)] === true);
-    const drankkaartHandled = !screen?.hasDrankkaarten || order.drankkaarten === 0 || (order.drankkaartDone ?? false);
+    const drankkaartHandled = !screen?.hasDrankkaarten || (order.drankkaarten || 0) === 0 || (order.drankkaartDone ?? false);
     const thisScreenNowDone = allMyItemsDone && drankkaartHandled;
 
     if (newVal && thisScreenNowDone && order.screenStatuses?.[schermId] !== true) {
@@ -207,9 +242,9 @@ export default function SchermPage() {
       updates[`screenCompletedAt.${schermId}`] = serverTimestamp();
       // Check if ALL screens are now done → mark order klaar
       const newScreenStatuses = { ...(order.screenStatuses || {}), [schermId]: true };
-      const newDrankkaartDone = order.drankkaartDone ?? (order.drankkaarten === 0);
+      const newDrankkaartDone = order.drankkaartDone ?? ((order.drankkaarten || 0) === 0);
       const allDone = allScreens.every((s) => {
-        if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || order.drankkaarten === 0 || newDrankkaartDone;
+        if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || (order.drankkaarten || 0) === 0 || newDrankkaartDone;
         return newScreenStatuses[s.id] === true;
       }) && newDrankkaartDone;
       if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
@@ -241,7 +276,7 @@ export default function SchermPage() {
       updates[`screenCompletedAt.${schermId}`] = serverTimestamp();
       const newScreenStatuses = { ...(order.screenStatuses || {}), [schermId]: true };
       const allDone = allScreens.every((s) => {
-        if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || order.drankkaarten === 0 || newVal;
+        if (!orderHasItemsForScreen(order, s)) return !s.hasDrankkaarten || (order.drankkaarten || 0) === 0 || newVal;
         return newScreenStatuses[s.id] === true;
       }) && newVal;
       if (allDone) { updates.status = 'klaar'; updates.completedAt = serverTimestamp(); }
@@ -314,6 +349,23 @@ export default function SchermPage() {
                 <button key={n} onClick={() => changeColumns(n)} className={`w-9 h-9 rounded text-sm font-bold transition-colors ${columns === n ? 'bg-[var(--accent)] text-white' : 'text-gray-400 hover:text-white'}`}>{n}</button>
               ))}
             </div>
+            <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
+              <button
+                onClick={toggleSound}
+                title={soundEnabled ? 'Geluid staat aan' : 'Geluid staat uit'}
+                className={`flex items-center gap-1 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm ${soundEnabled ? 'text-white' : 'text-gray-500'}`}
+              >
+                {soundEnabled ? '🔔' : '🔕'}
+                <span className="hidden sm:inline">{soundEnabled ? 'Geluid aan' : 'Geluid uit'}</span>
+              </button>
+              <button
+                onClick={() => playDing()}
+                title="Test geluid"
+                className="text-gray-400 hover:text-white py-1.5 px-2 rounded-lg transition-colors text-sm"
+              >
+                🔊 Test
+              </button>
+            </div>
             <button
               onClick={() => setShowKlaar((v) => !v)}
               className={`flex items-center gap-2 font-medium py-1.5 px-3 rounded-lg transition-colors text-sm border ${showKlaar ? 'bg-green-600/20 border-green-500/40 text-green-400' : 'bg-gray-700 border-gray-600 text-gray-300 hover:text-white'}`}
@@ -347,6 +399,7 @@ export default function SchermPage() {
                 <SchermOrderCard
                   key={o.id}
                   order={o}
+                  schermId={schermId}
                   fmt={fmt}
                   onMarkDone={canMarkDone ? () => markScreenDone(o) : undefined}
                   onUndo={undefined}
@@ -378,6 +431,7 @@ export default function SchermPage() {
                     <SchermOrderCard
                       key={o.id}
                       order={o}
+                      schermId={schermId}
                       fmt={fmt}
                       onMarkDone={undefined}
                       onUndo={() => undoScreenDone(o)}
@@ -421,6 +475,7 @@ function formatDuration(ms: number): string {
 
 function SchermOrderCard({
   order,
+  schermId,
   fmt,
   onMarkDone,
   onUndo,
@@ -434,6 +489,7 @@ function SchermOrderCard({
   onToggleDrankkaart,
 }: {
   order: Order;
+  schermId: string;
   fmt: (t: unknown) => string;
   onMarkDone?: () => void;
   onUndo?: () => void;
@@ -452,7 +508,8 @@ function SchermOrderCard({
   const totalVakjes = myItems.reduce((sum, i) => sum + (i.slots || 0) * i.quantity, 0);
 
   const createdMs = order.createdAt instanceof Timestamp ? order.createdAt.toDate().getTime() : null;
-  const completedMs = order.completedAt instanceof Timestamp ? order.completedAt.toDate().getTime() : null;
+  const screenCompletedAt = order.screenCompletedAt?.[schermId];
+  const completedMs = screenCompletedAt instanceof Timestamp ? screenCompletedAt.toDate().getTime() : null;
   const elapsedMs = isDone && completedMs && createdMs ? completedMs - createdMs : createdMs ? now - createdMs : null;
 
   // Map myItems back to their original indices in order.items
