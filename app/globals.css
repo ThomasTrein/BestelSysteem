@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Enables class-based dark mode (e.g. <div className="dark">...</div>) so the
+   bar screens can offer a manual light/dark toggle independent of the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --ksa-green: #2d6a4f;
   --ksa-yellow: #f4a261;
